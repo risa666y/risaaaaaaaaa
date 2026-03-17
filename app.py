@@ -63,205 +63,109 @@ def save_table_data(df, table_id):
 
 def get_valid_table_options():
     table_index = safe_load_json(INDEX_FILE)
-    groups = {}
-    for tid, info in table_index.items():
-        path = os.path.join(SAVE_DIR, f"{tid}.xlsx")
-        if os.path.exists(path):
-            fn = info['filename']
-            ut = info.get('upload_time', '')
-            if fn not in groups or ut > groups[fn]['upload_time']:
-                groups[fn] = {'table_id': tid, 'upload_time': ut, 'info': info}
-    opts, mp = [], {}
-    for fn, d in groups.items():
-        label = f"{d['upload_time']} | {fn}"
-        opts.append(label)
-        mp[label] = {'table_id': d['table_id'], 'filename': fn}
-    return sorted(opts, reverse=True), mp
+    return list(table_index.keys())
 
-# ===================== 会话状态 =====================
-if 'user' not in st.session_state:
-    st.session_state.user = None
-if 'announcements' not in st.session_state:
-    st.session_state.announcements = safe_load_json(ANNOUNCEMENT_FILE)
-if 'select_options' not in st.session_state:
-    st.session_state.select_options = safe_load_json(SELECT_OPTIONS_FILE)
+def update_show_tables(selected_tables):
+    safe_save_json(selected_tables, SHOW_TABLES_FILE)
 
-# ===================== 左侧登录及工具栏 =====================
-with st.sidebar:
-    st.header("🔐 系统登录")
-    username = st.text_input("用户名", placeholder="管理员或供应商")
-    col1, col2 = st.columns(2)
-    with col1:
-        if st.button("登录", use_container_width=True):
-            if username in USER_TO_SUPPLIER or username in ADMIN_USERS:
-                st.session_state.user = username
-                st.rerun()
-    with col2:
-        if st.button("退出登录", use_container_width=True):
-            st.session_state.user = None
-            st.rerun()
+def load_select_options():
+    return safe_load_json(SELECT_OPTIONS_FILE, default={})
 
-user = st.session_state.user
-is_admin = user in ADMIN_USERS
+def save_select_options(options):
+    safe_save_json(options, SELECT_OPTIONS_FILE)
 
-# ===================== 管理员工具栏 =====================
-if user and is_admin:
-    st.sidebar.divider()
-    
-    # 上传表格
-    st.sidebar.subheader("📤 上传新表格")
-    files = st.sidebar.file_uploader(
-        "选择Excel文件（必须包含「供应商简称」列）",
-        type=["xlsx"], 
-        accept_multiple_files=True
-    )
-    for f in files:
-        try:
-            df = pd.read_excel(f, engine='openpyxl')
-            if "供应商简称" not in df.columns:
-                st.sidebar.error(f"❌ {f.name} 缺少「供应商简称」列")
+# ===================== 页面逻辑 =====================
+def main():
+    st.title("多表格管理系统")
+
+    username = st.text_input("请输入用户名", value="", key="username")
+    if username.strip() == "":
+        st.warning("请输入用户名")
+        return
+
+    is_admin = username in ADMIN_USERS
+    supplier_name = USER_TO_SUPPLIER.get(username, None)
+
+    st.sidebar.write(f"当前用户: {username}")
+    st.sidebar.write(f"管理员模式: {is_admin}")
+
+    # ---------------- 管理端 ----------------
+    if is_admin:
+        st.header("管理端功能")
+
+        # 上传表格
+        uploaded_file = st.file_uploader("上传Excel表格", type=["xlsx"])
+        if uploaded_file is not None:
+            df = pd.read_excel(uploaded_file, engine='openpyxl', dtype=str).fillna("")
+            table_id = generate_table_id(uploaded_file.name)
+            save_table_data(df, table_id)
+
+            # 更新 index.json
+            index_data = safe_load_json(INDEX_FILE)
+            index_data[table_id] = uploaded_file.name
+            safe_save_json(index_data, INDEX_FILE)
+
+            st.success(f"表格上传成功: {uploaded_file.name}")
+
+        # 选择展示表格
+        st.subheader("选择展示给商家端的表格")
+        table_options = get_valid_table_options()
+        show_tables = safe_load_json(SHOW_TABLES_FILE, default=[])
+        selected_tables = st.multiselect("可展示表格", table_options, default=show_tables)
+        if st.button("保存展示表格"):
+            update_show_tables(selected_tables)
+            st.success("展示表格已更新")
+
+        # 配置下拉选项
+        st.subheader("配置多列下拉选项")
+        table_for_select = st.selectbox("选择表格", table_options)
+        if table_for_select:
+            df = load_table_data(table_for_select)
+            select_options = load_select_options()
+            columns = df.columns.tolist()
+            for col in columns:
+                current_options = select_options.get(table_for_select, {}).get(col, [])
+                new_options = st.text_area(f"列 {col} 下拉选项 (逗号分隔)", value=",".join(current_options))
+                select_options.setdefault(table_for_select, {})[col] = [x.strip() for x in new_options.split(",") if x.strip()]
+            if st.button("保存下拉选项"):
+                save_select_options(select_options)
+                st.success("下拉选项已保存")
+
+    # ---------------- 商家端 ----------------
+    else:
+        st.header(f"商家端 - {supplier_name}")
+
+        # 加载展示表格
+        show_tables = safe_load_json(SHOW_TABLES_FILE, default=[])
+        for table_id in show_tables:
+            df = load_table_data(table_id)
+            if df is None:
                 continue
-            tid = generate_table_id(f.name)
-            save_table_data(df, tid)
-            idx = safe_load_json(INDEX_FILE)
-            idx[tid] = {
-                'filename': f.name,
-                'upload_time': pd.Timestamp.now().strftime("%Y-%m-%d %H:%M:%S"),
-                'row_count': len(df)
-            }
-            safe_save_json(idx, INDEX_FILE)
-            st.sidebar.success(f"✅ 上传成功：{f.name}")
-        except Exception as e:
-            st.sidebar.error(f"❌ 上传失败：{str(e)}")
-    
-    st.sidebar.divider()
-    
-    # 展示给供应商
-    st.sidebar.subheader("🗂️ 展示给供应商的表格")
-    table_options, table_info_map = get_valid_table_options()
-    if table_options:
-        current_show_tables = safe_load_json(SHOW_TABLES_FILE)
-        valid_defaults = [t for t in current_show_tables if t in table_options]
-        selected_tables = st.sidebar.multiselect(
-            "多选展示表格",
-            options=table_options,
-            default=valid_defaults
-        )
-        if st.sidebar.button("保存展示配置", use_container_width=True):
-            safe_save_json(selected_tables, SHOW_TABLES_FILE)
-            st.sidebar.success("✅ 展示配置已保存")
-    
-    st.sidebar.divider()
-    
-    # 多列下拉选项配置
-    st.sidebar.subheader("⚙️ 设置表格下拉选项")
-    table_for_select = st.sidebar.selectbox("选择表格设置下拉列", table_options)
-    if table_for_select:
-        tid_select = table_info_map[table_for_select]['table_id']
-        df_sample = load_table_data(tid_select)
-        if df_sample is not None:
-            columns_for_dropdown = st.sidebar.multiselect("选择需要下拉的列", df_sample.columns.tolist())
-            dropdown_options = {}
-            for col in columns_for_dropdown:
-                opts = st.sidebar.text_area(f"列 {col} 下拉选项（用逗号分隔）", 
-                                            value=",".join(st.session_state.select_options.get(tid_select, {}).get(col, [])))
-                dropdown_options[col] = [o.strip() for o in opts.split(",") if o.strip()]
-            if st.sidebar.button("保存下拉选项"):
-                all_opts = safe_load_json(SELECT_OPTIONS_FILE)
-                all_opts[tid_select] = dropdown_options
-                safe_save_json(all_opts, SELECT_OPTIONS_FILE)
-                st.sidebar.success("✅ 下拉选项已保存")
 
-# ===================== 主页面 =====================
-st.title("📊 多表格管理系统")
-st.caption("商家可编辑、管理员可上传/管理")
-st.divider()
+            st.subheader(f"表格: {table_id}")
+            editable_df = df.copy()
 
-if not user:
-    st.warning("👈 请先登录")
-    st.stop()
+            # 加载下拉选项
+            select_options = load_select_options()
+            options_map = select_options.get(table_id, {})
 
-# ===================== 表格列表 =====================
-table_options, table_map = get_valid_table_options()
-if not is_admin:
-    show_tables = safe_load_json(SHOW_TABLES_FILE)
-    table_options = [t for t in table_options if t in show_tables]
+            # 商家只能修改原本为空的单元格
+            for col in df.columns:
+                for idx in df.index:
+                    cell_val = df.at[idx, col]
+                    if cell_val == "":
+                        opt_list = options_map.get(col, [])
+                        if opt_list:
+                            editable_df.at[idx, col] = st.selectbox(f"{col} 行{idx}", [""] + opt_list, key=f"{table_id}_{col}_{idx}")
+                        else:
+                            editable_df.at[idx, col] = st.text_input(f"{col} 行{idx}", value="", key=f"{table_id}_{col}_{idx}")
+                    else:
+                        editable_df.at[idx, col] = cell_val  # 已有内容不可修改
 
-if not table_options:
-    st.info("ℹ️ 暂无可操作表格")
-    st.stop()
+            # 保存修改
+            if st.button(f"保存表格 {table_id} 修改"):
+                save_table_data(editable_df, table_id)
+                st.success(f"{table_id} 已同步修改")
 
-sel = st.selectbox("选择表格", table_options)
-tid = table_map[sel]['table_id']
-fn = table_map[sel]['filename']
-st.subheader(f"📝 {fn}")
-
-# ===================== 公告栏 =====================
-st.markdown("### 📢 公告栏")
-if is_admin:
-    notice = st.text_area("管理员公告", st.session_state.announcements.get(tid, ""), height=80)
-    if st.button("保存公告"):
-        st.session_state.announcements[tid] = notice
-        safe_save_json(st.session_state.announcements, ANNOUNCEMENT_FILE)
-        st.success("✅ 公告已保存")
-else:
-    st.info(st.session_state.announcements.get(tid, "暂无公告"))
-
-# ===================== 加载数据 =====================
-df_full = load_table_data(tid)
-if df_full is None:
-    st.error("❌ 数据加载失败")
-    st.stop()
-
-supplier_name = USER_TO_SUPPLIER.get(user) if not is_admin else None
-if not is_admin:
-    df_edit = df_full[df_full["供应商简称"] == supplier_name].copy()
-    if df_edit.empty:
-        st.info(f"ℹ️ 该表格中暂无 {supplier_name} 的数据")
-        st.stop()
-else:
-    df_edit = df_full.copy()
-
-# ===================== 应用下拉选项 =====================
-if is_admin:
-    select_options = safe_load_json(SELECT_OPTIONS_FILE)
-else:
-    select_options = safe_load_json(SELECT_OPTIONS_FILE).get(tid, {})
-
-for col, opts in select_options.items():
-    if col in df_edit.columns:
-        df_edit[col] = pd.Categorical(df_edit[col], categories=opts)
-
-# ===================== 可编辑表格 =====================
-# -------------------- 确保唯一 key --------------------
-editor_key = f"editor_{tid}_{user}"
-
-# 清理旧 session_state 避免前端 DOM 报错
-if editor_key in st.session_state:
-    st.session_state.pop(editor_key)
-
-# -------------------- 渲染可编辑表格 --------------------
-df_edited = st.data_editor(
-    df_edit,
-    use_container_width=True,
-    height=400,
-    key=editor_key,
-    disabled=["供应商简称"] if not is_admin else []
-)
-
-# ===================== 保存逻辑 =====================
-st.divider()
-if st.button("💾 保存数据", type="primary"):
-    try:
-        if is_admin:
-            save_table_data(df_edited, tid)
-        else:
-            mask = df_full["供应商简称"] == supplier_name
-            df_full.loc[mask, :] = df_edited.values
-            save_table_data(df_full, tid)
-        st.success("✅ 保存成功！管理员端已同步")
-    except Exception as e:
-        st.error(f"❌ 保存失败：{str(e)}")
-
-if is_admin and st.button("🔄 刷新最新数据"):
-    st.rerun()
+if __name__ == "__main__":
+    main()

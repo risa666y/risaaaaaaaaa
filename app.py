@@ -12,7 +12,7 @@ os.makedirs(SAVE_DIR, exist_ok=True)
 INDEX_FILE = f"{SAVE_DIR}/index.json"
 SHOW_FILE = f"{SAVE_DIR}/show_tables.json"
 SELECT_FILE = f"{SAVE_DIR}/select_options.json"
-NOTICE_FILE = f"{SAVE_DIR}/notice.json"
+NOTICE_FILE = f"{SAVE_DIR}/notice.json"  # 新增公告存储文件
 
 # ================= 用户 =================
 SUPPLIER_CONFIG = {
@@ -85,7 +85,7 @@ if not user:
 
 is_admin = user in ADMIN_USERS
 
-# ================= 上传表格 =================
+# ================= 上传 =================
 if is_admin:
     st.sidebar.divider()
     st.sidebar.subheader("上传表格")
@@ -111,15 +111,18 @@ if is_admin:
 
         st.sidebar.success("上传完成")
 
-# ================= 表格选择 =================
+# ================= 表格列表 =================
 options, mp = get_tables()
 
-st.sidebar.divider()
+# ⭐⭐⭐ 核心修复：用 tid 存展示 ⭐⭐⭐
+if is_admin:
+    st.sidebar.divider()
+
 st.sidebar.subheader("表格列表")
 selected_label = st.sidebar.selectbox("选择表格查看", options)
 selected_tid = mp.get(selected_label)
 
-# ================= 公告栏（主页面表格上方显示） =================
+# ================= 公告栏（表格上方显示） =================
 st.subheader("📢 公告栏")
 if is_admin:
     notice_text = st.text_area("编辑公告", value=load_notice(), height=100)
@@ -136,7 +139,7 @@ if selected_tid:
         st.write(f"显示表格: {selected_label}")
         st.dataframe(df)
 
-        # 管理员删除表格
+        # 管理员可删除表格
         if is_admin:
             if st.button("删除该表格"):
                 os.remove(f"{SAVE_DIR}/{selected_tid}.xlsx")

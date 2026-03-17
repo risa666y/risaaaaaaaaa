@@ -21,6 +21,7 @@ INDEX_FILE = os.path.join(SAVE_DIR, "index.json")
 SHOW_TABLES_FILE = os.path.join(SAVE_DIR, "show_tables.json")
 SELECT_OPTIONS_FILE = os.path.join(SAVE_DIR, "select_options.json")
 ANNOUNCEMENT_FILE = os.path.join(SAVE_DIR, "announcements.json")
+LOGIN_FILE = os.path.join(SAVE_DIR, "login_users.json")
 
 # ===================== 供应商及管理员配置 =====================
 SUPPLIER_CONFIG = {
@@ -86,16 +87,26 @@ if 'announcements' not in st.session_state:
 if 'select_options' not in st.session_state:
     st.session_state.select_options = safe_load_json(SELECT_OPTIONS_FILE)
 
-# ===================== 左侧登录及工具栏 =====================
+# ===================== 左侧登录及工具栏（带记住账户功能） =====================
+saved_users = safe_load_json(LOGIN_FILE, default=[])
+
 with st.sidebar:
     st.header("🔐 系统登录")
-    username = st.text_input("用户名", placeholder="管理员或供应商")
+    
+    selected_user = st.selectbox("选择账户", options=[""] + saved_users, index=0)
+    username_input = st.text_input("或输入新用户名", value=selected_user)
+    
     col1, col2 = st.columns(2)
     with col1:
         if st.button("登录", use_container_width=True):
-            if username in USER_TO_SUPPLIER or username in ADMIN_USERS:
-                st.session_state.user = username
+            if username_input in USER_TO_SUPPLIER or username_input in ADMIN_USERS:
+                st.session_state.user = username_input
+                if username_input not in saved_users:
+                    saved_users.append(username_input)
+                    safe_save_json(saved_users, LOGIN_FILE)
                 st.rerun()
+            else:
+                st.error("❌ 用户名无效")
     with col2:
         if st.button("退出登录", use_container_width=True):
             st.session_state.user = None

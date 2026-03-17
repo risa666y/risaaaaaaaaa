@@ -3,6 +3,7 @@ import pandas as pd
 import os
 import json
 import hashlib
+from st_aggrid import AgGrid, GridOptionsBuilder, GridUpdateMode
 
 st.set_page_config(page_title="多表格管理系统", layout="wide")
 
@@ -11,7 +12,7 @@ os.makedirs(SAVE_DIR, exist_ok=True)
 
 INDEX_FILE = f"{SAVE_DIR}/index.json"
 NOTICE_FILE = f"{SAVE_DIR}/notice.json"
-SELECT_FILE = f"{SAVE_DIR}/select_options.json"  # 保存每列下拉选项
+SELECT_FILE = f"{SAVE_DIR}/select_options.json"  # 保存列级下拉选项
 
 # ================= 用户 =================
 SUPPLIER_CONFIG = {
@@ -33,7 +34,7 @@ def save_json(data, path):
     json.dump(data, open(path, "w", encoding="utf-8"), ensure_ascii=False, indent=2)
 
 def gen_id(name):
-    return hashlib.md5((name+str(pd.Timestamp.now())).encode()).hexdigest()[:10]
+    return hashlib.md5((name + str(pd.Timestamp.now())).encode()).hexdigest()[:10]
 
 def save_excel(df, tid):
     df.to_excel(f"{SAVE_DIR}/{tid}.xlsx", index=False)
@@ -82,19 +83,25 @@ is_admin = user in ADMIN_USERS
 if is_admin:
     st.sidebar.divider()
     st.sidebar.subheader("上传表格")
-    files = st.sidebar.file_uploader("上传Excel", type=["xlsx"], accept_multiple_files=True)
+    uploaded_files = st.sidebar.file_uploader(
+        "上传Excel", type=["xlsx"], accept_multiple_files=True, key="file_uploader"
+    )
+
     if st.sidebar.button("确认上传"):
-        for f in files:
-            df = pd.read_excel(f)
-            if "供应商简称" not in df.columns:
-                st.sidebar.error(f"{f.name}缺少列")
-                continue
-            tid = gen_id(f.name)
-            save_excel(df, tid)
-            idx = load_json(INDEX_FILE, {})
-            idx[tid] = {"filename": f.name, "upload_time": str(pd.Timestamp.now())}
-            save_json(idx, INDEX_FILE)
-        st.sidebar.success("上传完成")
+        if uploaded_files:
+            for f in uploaded_files:
+                df = pd.read_excel(f)
+                if "供应商简称" not in df.columns:
+                    st.sidebar.error(f"{f.name}缺少列")
+                    continue
+                tid = gen_id(f.name)
+                save_excel(df, tid)
+                idx = load_json(INDEX_FILE, {})
+                idx[tid] = {"filename": f.name, "upload_time": str(pd.Timestamp.now())}
+                save_json(idx, INDEX_FILE)
+            st.sidebar.success("上传完成")
+        else:
+            st.sidebar.warning("请先选择要上传的文件")
 
 # ================= 表格选择 =================
 options, mp = get_tables()
@@ -106,12 +113,14 @@ selected_tid = mp[selected_label] if selected_label else None
 # ================= 公告栏 =================
 st.subheader("📢 公告栏")
 if is_admin:
-    notice_text = st.text_area("编辑公告", value=load_json(NOTICE_FILE, {"text": ""}).get("text",""), height=100)
+    notice_text = st.text_area(
+        "编辑公告", value=load_json(NOTICE_FILE, {"text": ""}).get("text", ""), height=100
+    )
     if st.button("更新公告"):
         save_json({"text": notice_text}, NOTICE_FILE)
         st.success("公告已更新")
 else:
-    st.info(load_json(NOTICE_FILE, {"text": ""}).get("text","") or "暂无公告")
+    st.info(load_json(NOTICE_FILE, {"text": ""}).get("text", "") or "暂无公告")
 
 # ================= 表格展示 =================
 if selected_tid:
@@ -129,7 +138,9 @@ if selected_tid:
             st.sidebar.subheader("设置下拉列选项（列级别）")
             for col in df.columns:
                 existing_opts = table_select_cols.get(col, [])
-                new_opts = st.sidebar.text_area(f"{col} 下拉选项(逗号分隔，不设置留空)", value=",".join(existing_opts))
+                new_opts = st.sidebar.text_area(
+                    f"{col} 下拉选项(逗号分隔，不设置留空)", value=",".join(existing_opts)
+                )
                 opts_list = [x.strip() for x in new_opts.split(",") if x.strip()]
                 if opts_list:
                     table_select_cols[col] = opts_list
@@ -140,21 +151,30 @@ if selected_tid:
                 save_json(select_options_data, SELECT_FILE)
                 st.success("下拉配置已保存")
 
-        # 表格填写：列级下拉配置生效
-        editable_data = []
-        for i in range(len(df)):
-            row_data = {}
-            for col in df.columns:
-                key = f"{selected_tid}_{col}_{i}"  # 唯一 key 避免 DuplicateWidgetID
-                if col in table_select_cols and table_select_cols[col]:
-                    row_data[col] = st.selectbox(f"{col}（行{i+1}）", [""] + table_select_cols[col],
-                                                 index=table_select_cols[col].index(df.at[i, col]) if df.at[i, col] in table_select_cols[col] else 0,
-                                                 key=key)
-                else:
-                    row_data[col] = st.text_input(f"{col}（行{i+1}）", df.at[i, col], key=key)
-            editable_data.append(row_data)
+        # 构建 AgGrid 表格
+        gb = GridOptionsBuilder.from_dataframe(df)
+        gb.configure_default_column(editable=True)
 
-        editable_df = pd.DataFrame(editable_data)
+        for col in df.columns:
+            if col in table_select_cols and table_select_cols[col]:
+                gb.configure_column(
+                    col,
+                    editable=True,
+                    cellEditor="agSelectCellEditor",
+                    cellEditorParams={"values": table_select_cols[col]},
+                )
+
+        grid_options = gb.build()
+        grid_response = AgGrid(
+            df,
+            gridOptions=grid_options,
+            height=400,
+            width='100%',
+            update_mode=GridUpdateMode.VALUE_CHANGED,
+            fit_columns_on_grid_load=True
+        )
+
+        editable_df = pd.DataFrame(grid_response['data'])
         st.dataframe(editable_df)
 
         # 管理员删除表格

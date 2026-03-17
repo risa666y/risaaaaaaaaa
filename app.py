@@ -11,7 +11,7 @@ os.makedirs(SAVE_DIR, exist_ok=True)
 
 INDEX_FILE = f"{SAVE_DIR}/index.json"
 NOTICE_FILE = f"{SAVE_DIR}/notice.json"
-SELECT_FILE = f"{SAVE_DIR}/select_options.json"  # 多列下拉配置
+SELECT_FILE = f"{SAVE_DIR}/select_options.json"  # 保存每列下拉选项
 
 # ================= 用户 =================
 SUPPLIER_CONFIG = {
@@ -119,18 +119,17 @@ if selected_tid:
     if df is not None:
         st.write(f"显示表格: {selected_label}")
 
-        # 下拉配置
+        # 下拉选项数据
         select_options_data = load_json(SELECT_FILE, {})
         table_select_cols = select_options_data.get(selected_tid, {})
 
-        # 管理员可选配置下拉列和选项
+        # 管理员侧边栏设置列级下拉选项
         if is_admin:
             st.sidebar.divider()
-            st.sidebar.subheader("配置下拉列及选项（可选）")
-            cols_to_config = st.sidebar.multiselect("选择要设置下拉的列", df.columns.tolist(), default=list(table_select_cols.keys()))
-            for col in cols_to_config:
+            st.sidebar.subheader("设置下拉列选项（列级别）")
+            for col in df.columns:
                 existing_opts = table_select_cols.get(col, [])
-                new_opts = st.sidebar.text_area(f"{col} 下拉选项(逗号分隔，不设置可留空)", value=",".join(existing_opts))
+                new_opts = st.sidebar.text_area(f"{col} 下拉选项(逗号分隔，不设置留空)", value=",".join(existing_opts))
                 opts_list = [x.strip() for x in new_opts.split(",") if x.strip()]
                 if opts_list:
                     table_select_cols[col] = opts_list
@@ -141,21 +140,21 @@ if selected_tid:
                 save_json(select_options_data, SELECT_FILE)
                 st.success("下拉配置已保存")
 
-        # 表格填写：下拉列使用 selectbox，其它列自由填写
-        editable_df = df.copy()
-        for col in df.columns:
-            if col in table_select_cols and table_select_cols[col]:
-                new_col = []
-                for i, v in enumerate(editable_df[col]):
-                    unique_key = f"{selected_tid}_{col}_{i}"  # 唯一 key
-                    sel = st.selectbox(f"{col}（填写）", [""] + table_select_cols[col],
-                                       index=table_select_cols[col].index(v) if v in table_select_cols[col] else 0,
-                                       key=unique_key)
-                    new_col.append(sel)
-                editable_df[col] = new_col
-            else:
-                editable_df[col] = editable_df[col]
+        # 表格填写：列级下拉配置生效
+        editable_data = []
+        for i in range(len(df)):
+            row_data = {}
+            for col in df.columns:
+                key = f"{selected_tid}_{col}_{i}"  # 唯一 key 避免 DuplicateWidgetID
+                if col in table_select_cols and table_select_cols[col]:
+                    row_data[col] = st.selectbox(f"{col}（行{i+1}）", [""] + table_select_cols[col],
+                                                 index=table_select_cols[col].index(df.at[i, col]) if df.at[i, col] in table_select_cols[col] else 0,
+                                                 key=key)
+                else:
+                    row_data[col] = st.text_input(f"{col}（行{i+1}）", df.at[i, col], key=key)
+            editable_data.append(row_data)
 
+        editable_df = pd.DataFrame(editable_data)
         st.dataframe(editable_df)
 
         # 管理员删除表格

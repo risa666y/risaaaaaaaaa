@@ -12,7 +12,6 @@ os.makedirs(SAVE_DIR, exist_ok=True)
 INDEX_FILE = f"{SAVE_DIR}/index.json"
 SHOW_FILE = f"{SAVE_DIR}/show_tables.json"
 SELECT_FILE = f"{SAVE_DIR}/select_options.json"
-NOTICE_FILE = f"{SAVE_DIR}/notice.json"  # 新增公告栏存储文件
 
 # ================= 用户 =================
 SUPPLIER_CONFIG = {
@@ -107,16 +106,7 @@ if is_admin:
 
 # ================= 表格列表 =================
 options, mp = get_tables()
+
+# ⭐⭐⭐ 核心修复：用 tid 存展示 ⭐⭐⭐
 if is_admin:
     st.sidebar.divider()
-
-# ================= 公告栏 =================
-st.subheader("📢 公告栏")
-notice_data = load_json(NOTICE_FILE, {"text": ""})
-if is_admin:
-    notice_text = st.text_area("编辑公告", value=notice_data.get("text", ""), height=100)
-    if st.button("更新公告"):
-        save_json({"text": notice_text}, NOTICE_FILE)
-        st.success("公告已更新")
-else:
-    st.info(notice_data.get("text", "") or "暂无公告")

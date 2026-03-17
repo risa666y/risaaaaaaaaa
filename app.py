@@ -131,7 +131,6 @@ if selected_tid:
             for col in cols_to_config:
                 existing_opts = table_select_cols.get(col, [])
                 new_opts = st.sidebar.text_area(f"{col} 下拉选项(逗号分隔，不设置可留空)", value=",".join(existing_opts))
-                # 如果为空列表，则表示不设置下拉
                 opts_list = [x.strip() for x in new_opts.split(",") if x.strip()]
                 if opts_list:
                     table_select_cols[col] = opts_list
@@ -146,12 +145,15 @@ if selected_tid:
         editable_df = df.copy()
         for col in df.columns:
             if col in table_select_cols and table_select_cols[col]:
-                # 使用下拉选择
-                editable_df[col] = editable_df[col].apply(
-                    lambda v: st.selectbox(f"{col}（填写）", [""] + table_select_cols[col], index=table_select_cols[col].index(v) if v in table_select_cols[col] else 0, key=f"{col}_{v}")
-                )
+                new_col = []
+                for i, v in enumerate(editable_df[col]):
+                    unique_key = f"{selected_tid}_{col}_{i}"  # 唯一 key
+                    sel = st.selectbox(f"{col}（填写）", [""] + table_select_cols[col],
+                                       index=table_select_cols[col].index(v) if v in table_select_cols[col] else 0,
+                                       key=unique_key)
+                    new_col.append(sel)
+                editable_df[col] = new_col
             else:
-                # 普通列直接显示原值
                 editable_df[col] = editable_df[col]
 
         st.dataframe(editable_df)

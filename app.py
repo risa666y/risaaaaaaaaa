@@ -123,27 +123,36 @@ if selected_tid:
         select_options_data = load_json(SELECT_FILE, {})
         table_select_cols = select_options_data.get(selected_tid, {})
 
-        # 管理员配置下拉列和选项
+        # 管理员可选配置下拉列和选项
         if is_admin:
             st.sidebar.divider()
-            st.sidebar.subheader("配置下拉列及选项")
-            cols_to_config = st.sidebar.multiselect("选择下拉列", df.columns.tolist(), default=list(table_select_cols.keys()))
+            st.sidebar.subheader("配置下拉列及选项（可选）")
+            cols_to_config = st.sidebar.multiselect("选择要设置下拉的列", df.columns.tolist(), default=list(table_select_cols.keys()))
             for col in cols_to_config:
                 existing_opts = table_select_cols.get(col, [])
-                new_opts = st.sidebar.text_area(f"{col} 下拉选项(逗号分隔)", value=",".join(existing_opts))
-                table_select_cols[col] = [x.strip() for x in new_opts.split(",") if x.strip()]
+                new_opts = st.sidebar.text_area(f"{col} 下拉选项(逗号分隔，不设置可留空)", value=",".join(existing_opts))
+                # 如果为空列表，则表示不设置下拉
+                opts_list = [x.strip() for x in new_opts.split(",") if x.strip()]
+                if opts_list:
+                    table_select_cols[col] = opts_list
+                elif col in table_select_cols:
+                    table_select_cols.pop(col)
             if st.sidebar.button("保存下拉配置"):
                 select_options_data[selected_tid] = table_select_cols
                 save_json(select_options_data, SELECT_FILE)
                 st.success("下拉配置已保存")
 
-        # 填写表格，使用下拉列
+        # 表格填写：下拉列使用 selectbox，其它列自由填写
         editable_df = df.copy()
-        for col, opts in table_select_cols.items():
-            if opts:
+        for col in df.columns:
+            if col in table_select_cols and table_select_cols[col]:
+                # 使用下拉选择
                 editable_df[col] = editable_df[col].apply(
-                    lambda v: st.selectbox(f"{col}（填写）", [""] + opts, index=opts.index(v) if v in opts else 0, key=f"{col}_{v}")
+                    lambda v: st.selectbox(f"{col}（填写）", [""] + table_select_cols[col], index=table_select_cols[col].index(v) if v in table_select_cols[col] else 0, key=f"{col}_{v}")
                 )
+            else:
+                # 普通列直接显示原值
+                editable_df[col] = editable_df[col]
 
         st.dataframe(editable_df)
 

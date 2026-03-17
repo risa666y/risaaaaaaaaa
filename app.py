@@ -110,3 +110,86 @@ options, mp = get_tables()
 # ⭐⭐⭐ 核心修复：用 tid 存展示 ⭐⭐⭐
 if is_admin:
     st.sidebar.divider()
+
+    if "show_tables" not in st.session_state:
+        st.session_state.show_tables = load_json(SHOW_FILE, [])
+
+    selected_labels = st.sidebar.multiselect(
+        "展示给商家",
+        options,
+        default=[l for l in options if mp[l] in st.session_state.show_tables]
+    )
+
+    if st.sidebar.button("保存展示"):
+        selected_tids = [mp[l] for l in selected_labels]
+        st.session_state.show_tables = selected_tids
+        save_json(selected_tids, SHOW_FILE)
+        st.sidebar.success("已保存")
+
+else:
+    show_tids = load_json(SHOW_FILE, [])
+    options = [o for o in options if mp[o] in show_tids]
+
+# 没表直接退出
+if not options:
+    st.warning("没有可显示表格（请管理员先设置展示）")
+    st.stop()
+
+sel = st.selectbox("选择表格", options)
+tid = mp[sel]
+
+df = load_excel(tid)
+
+# ================= 商家过滤 =================
+if not is_admin:
+    supplier = USER_MAP[user]
+    df_edit = df[df["供应商简称"] == supplier].copy()
+else:
+    df_edit = df.copy()
+
+# ================= 下拉配置 =================
+select_all = load_json(SELECT_FILE, {})
+select_cfg = select_all.get(tid, {})
+
+column_config = {}
+for col, opts in select_cfg.items():
+    if col in df_edit.columns:
+        column_config[col] = st.column_config.SelectboxColumn(options=opts)
+
+# ================= 管理端配置下拉 =================
+if is_admin:
+    st.sidebar.divider()
+    st.sidebar.subheader("下拉配置")
+
+    col_select = st.sidebar.multiselect("选择列", df.columns.tolist())
+
+    new_cfg = {}
+    for col in col_select:
+        txt = st.sidebar.text_area(f"{col}选项（逗号分隔）", "")
+        new_cfg[col] = [i.strip() for i in txt.split(",") if i.strip()]
+
+    if st.sidebar.button("保存下拉"):
+        all_cfg = load_json(SELECT_FILE, {})
+        all_cfg[tid] = new_cfg
+        save_json(all_cfg, SELECT_FILE)
+        st.sidebar.success("已保存")
+        st.rerun()
+
+# ================= 表格 =================
+edited = st.data_editor(
+    df_edit,
+    use_container_width=True,
+    column_config=column_config,
+    key=f"editor_{tid}_{user}"
+)
+
+# ================= 保存 =================
+if st.button("保存"):
+    if is_admin:
+        save_excel(edited, tid)
+    else:
+        supplier = USER_MAP[user]
+        df.loc[df["供应商简称"] == supplier] = edited.values
+        save_excel(df, tid)
+
+    st.success("保存成功")

@@ -10,9 +10,8 @@ SAVE_DIR = "saved_tables"
 os.makedirs(SAVE_DIR, exist_ok=True)
 
 INDEX_FILE = f"{SAVE_DIR}/index.json"
-SHOW_FILE = f"{SAVE_DIR}/show_tables.json"
-SELECT_FILE = f"{SAVE_DIR}/select_options.json"
-NOTICE_FILE = f"{SAVE_DIR}/notice.json"  # 公告栏存储
+NOTICE_FILE = f"{SAVE_DIR}/notice.json"
+SELECT_FILE = f"{SAVE_DIR}/select_options.json"  # 保存多列下拉配置
 
 # ================= 用户 =================
 SUPPLIER_CONFIG = {
@@ -60,6 +59,12 @@ def load_notice():
 def save_notice(text):
     save_json({"text": text}, NOTICE_FILE)
 
+def load_select_options():
+    return load_json(SELECT_FILE, {})
+
+def save_select_options(data):
+    save_json(data, SELECT_FILE)
+
 # ================= 登录 =================
 if "user" not in st.session_state:
     st.session_state.user = None
@@ -89,16 +94,13 @@ is_admin = user in ADMIN_USERS
 if is_admin:
     st.sidebar.divider()
     st.sidebar.subheader("上传表格")
-
     files = st.sidebar.file_uploader("上传Excel", type=["xlsx"], accept_multiple_files=True)
-
     if st.sidebar.button("确认上传"):
         for f in files:
             df = pd.read_excel(f)
             if "供应商简称" not in df.columns:
                 st.sidebar.error(f"{f.name}缺少列")
                 continue
-
             tid = gen_id(f.name)
             save_excel(df, tid)
 
@@ -108,17 +110,12 @@ if is_admin:
                 "upload_time": str(pd.Timestamp.now())
             }
             save_json(idx, INDEX_FILE)
-
         st.sidebar.success("上传完成")
 
-# ================= 表格列表 =================
+# ================= 表格选择 =================
 options, mp = get_tables()
-
-if is_admin:
-    st.sidebar.divider()
-
+st.sidebar.divider()
 st.sidebar.subheader("表格列表")
-# ✅ 完全保留原有下拉逻辑
 selected_label = st.sidebar.selectbox("选择表格查看", options)
 selected_tid = mp[selected_label] if selected_label else None
 
@@ -137,8 +134,33 @@ if selected_tid:
     df = load_excel(selected_tid)
     if df is not None:
         st.write(f"显示表格: {selected_label}")
-        st.dataframe(df)
 
+        select_options_data = load_select_options()
+        table_select_cols = select_options_data.get(selected_tid, {})
+
+        # 管理员可设置下拉列和选项
+        if is_admin:
+            st.sidebar.divider()
+            st.sidebar.subheader("配置下拉列选项")
+            cols_to_config = st.sidebar.multiselect("选择下拉列", df.columns.tolist(), default=list(table_select_cols.keys()))
+            for col in cols_to_config:
+                existing_opts = table_select_cols.get(col, [])
+                new_opts = st.sidebar.text_area(f"{col} 下拉选项，用逗号分隔", value=",".join(existing_opts))
+                table_select_cols[col] = [x.strip() for x in new_opts.split(",") if x.strip()]
+            if st.sidebar.button("保存下拉配置"):
+                select_options_data[selected_tid] = table_select_cols
+                save_select_options(select_options_data)
+                st.success("下拉配置已保存")
+
+        # 表格展示：下拉列用 selectbox，其他显示普通文本
+        editable_df = df.copy()
+        for col, opts in table_select_cols.items():
+            if opts:
+                editable_df[col] = editable_df[col].apply(lambda v: st.selectbox(f"{col}（填写）", [""] + opts, index=opts.index(v) if v in opts else 0, key=f"{col}_{v}"))
+
+        st.dataframe(editable_df)
+
+        # 管理员删除表格
         if is_admin:
             if st.button("删除该表格"):
                 os.remove(f"{SAVE_DIR}/{selected_tid}.xlsx")

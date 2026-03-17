@@ -12,7 +12,7 @@ os.makedirs(SAVE_DIR, exist_ok=True)
 INDEX_FILE = f"{SAVE_DIR}/index.json"
 SHOW_FILE = f"{SAVE_DIR}/show_tables.json"
 SELECT_FILE = f"{SAVE_DIR}/select_options.json"
-NOTICE_FILE = f"{SAVE_DIR}/notice.json"  # 新增公告存储文件
+NOTICE_FILE = f"{SAVE_DIR}/notice.json"  # 公告栏存储
 
 # ================= 用户 =================
 SUPPLIER_CONFIG = {
@@ -118,6 +118,7 @@ options, mp = get_tables()
 if is_admin:
     st.sidebar.divider()
 
+# 保留原有下拉选择逻辑
 st.sidebar.subheader("表格列表")
 selected_label = st.sidebar.selectbox("选择表格查看", options)
 selected_tid = mp.get(selected_label)

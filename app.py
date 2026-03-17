@@ -21,9 +21,8 @@ INDEX_FILE = os.path.join(SAVE_DIR, "index.json")
 SHOW_TABLES_FILE = os.path.join(SAVE_DIR, "show_tables.json")
 SELECT_OPTIONS_FILE = os.path.join(SAVE_DIR, "select_options.json")
 ANNOUNCEMENT_FILE = os.path.join(SAVE_DIR, "announcements.json")
-LOGIN_FILE = os.path.join(SAVE_DIR, "login_list.json")
 
-# ===================== 用户配置 =====================
+# ===================== 供应商及管理员配置 =====================
 SUPPLIER_CONFIG = {
     "恒尚": ["A小康先森"],
     "福蕾雅": ["严金虹"],
@@ -86,34 +85,26 @@ if 'announcements' not in st.session_state:
     st.session_state.announcements = safe_load_json(ANNOUNCEMENT_FILE)
 if 'select_options' not in st.session_state:
     st.session_state.select_options = safe_load_json(SELECT_OPTIONS_FILE)
-if 'login_list' not in st.session_state:
-    st.session_state.login_list = safe_load_json(LOGIN_FILE, [])
 
-# ===================== 左侧登录 =====================
+# ===================== 左侧登录及工具栏 =====================
 with st.sidebar:
     st.header("🔐 系统登录")
-    username_input = st.text_input("用户名", placeholder="管理员或供应商用户名")
+    username = st.text_input("用户名", placeholder="管理员或供应商")
     col1, col2 = st.columns(2)
     with col1:
         if st.button("登录", use_container_width=True):
-            if username_input in USER_TO_SUPPLIER or username_input in ADMIN_USERS:
-                st.session_state.user = username_input
-                if username_input not in st.session_state.login_list:
-                    st.session_state.login_list.append(username_input)
-                    safe_save_json(st.session_state.login_list, LOGIN_FILE)
-                st.success(f"✅ 登录成功：{username_input}")
+            if username in USER_TO_SUPPLIER or username in ADMIN_USERS:
+                st.session_state.user = username
                 st.rerun()
-            else:
-                st.error("❌ 用户名不存在！")
     with col2:
         if st.button("退出登录", use_container_width=True):
             st.session_state.user = None
             st.rerun()
 
 user = st.session_state.user
-is_admin = user in ADMIN_USERS if user else False
+is_admin = user in ADMIN_USERS
 
-# ===================== 管理端工具栏 =====================
+# ===================== 管理员工具栏 =====================
 if user and is_admin:
     st.sidebar.divider()
     
@@ -183,14 +174,14 @@ if user and is_admin:
 
 # ===================== 主页面 =====================
 st.title("📊 多表格管理系统")
-st.caption("商家可编辑空白单元格、管理员可上传/管理/填写")
+st.caption("商家可编辑、管理员可上传/管理")
 st.divider()
 
 if not user:
     st.warning("👈 请先登录")
     st.stop()
 
-# 表格列表
+# ===================== 表格列表 =====================
 table_options, table_map = get_valid_table_options()
 if not is_admin:
     show_tables = safe_load_json(SHOW_TABLES_FILE)
@@ -205,7 +196,7 @@ tid = table_map[sel]['table_id']
 fn = table_map[sel]['filename']
 st.subheader(f"📝 {fn}")
 
-# 公告栏
+# ===================== 公告栏 =====================
 st.markdown("### 📢 公告栏")
 if is_admin:
     notice = st.text_area("管理员公告", st.session_state.announcements.get(tid, ""), height=80)
@@ -216,7 +207,7 @@ if is_admin:
 else:
     st.info(st.session_state.announcements.get(tid, "暂无公告"))
 
-# 加载数据
+# ===================== 加载数据 =====================
 df_full = load_table_data(tid)
 if df_full is None:
     st.error("❌ 数据加载失败")
@@ -225,26 +216,32 @@ if df_full is None:
 supplier_name = USER_TO_SUPPLIER.get(user) if not is_admin else None
 if not is_admin:
     df_edit = df_full[df_full["供应商简称"] == supplier_name].copy()
+    if df_edit.empty:
+        st.info(f"ℹ️ 该表格中暂无 {supplier_name} 的数据")
+        st.stop()
 else:
     df_edit = df_full.copy()
 
-# 应用下拉选项
-select_options = safe_load_json(SELECT_OPTIONS_FILE).get(tid, {})
+# ===================== 应用下拉选项 =====================
+if is_admin:
+    select_options = safe_load_json(SELECT_OPTIONS_FILE)
+else:
+    select_options = safe_load_json(SELECT_OPTIONS_FILE).get(tid, {})
+
 for col, opts in select_options.items():
     if col in df_edit.columns:
         df_edit[col] = pd.Categorical(df_edit[col], categories=opts)
 
-# 可编辑表格
-disabled_cols = [] if is_admin else [c for c in df_edit.columns if c != "供应商简称"]
+# ===================== 可编辑表格 =====================
 df_edited = st.data_editor(
     df_edit,
     use_container_width=True,
     height=400,
     key=f"editor_{tid}_{user}",
-    disabled=disabled_cols
+    disabled=["供应商简称"] if not is_admin else []
 )
 
-# 保存逻辑
+# ===================== 保存逻辑 =====================
 st.divider()
 if st.button("💾 保存数据", type="primary"):
     try:
@@ -254,7 +251,7 @@ if st.button("💾 保存数据", type="primary"):
             mask = df_full["供应商简称"] == supplier_name
             df_full.loc[mask, :] = df_edited.values
             save_table_data(df_full, tid)
-        st.success("✅ 保存成功！")
+        st.success("✅ 保存成功！管理员端已同步")
     except Exception as e:
         st.error(f"❌ 保存失败：{str(e)}")
 

@@ -114,16 +114,15 @@ if is_admin:
 # ================= 表格列表 =================
 options, mp = get_tables()
 
-# ⭐⭐⭐ 核心修复：用 tid 存展示 ⭐⭐⭐
 if is_admin:
     st.sidebar.divider()
 
-# **保留原有 sidebar 下拉选择**
 st.sidebar.subheader("表格列表")
+# ✅ 完全保留原有下拉逻辑
 selected_label = st.sidebar.selectbox("选择表格查看", options)
-selected_tid = mp.get(selected_label)
+selected_tid = mp[selected_label] if selected_label else None
 
-# ================= 公告栏（表格上方显示） =================
+# ================= 公告栏 =================
 st.subheader("📢 公告栏")
 if is_admin:
     notice_text = st.text_area("编辑公告", value=load_notice(), height=100)
@@ -140,7 +139,6 @@ if selected_tid:
         st.write(f"显示表格: {selected_label}")
         st.dataframe(df)
 
-        # 管理员可删除表格
         if is_admin:
             if st.button("删除该表格"):
                 os.remove(f"{SAVE_DIR}/{selected_tid}.xlsx")

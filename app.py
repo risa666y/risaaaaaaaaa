@@ -6,7 +6,6 @@ import hashlib
 
 st.set_page_config(page_title="多表格管理系统", layout="wide")
 
-# ================= 保存目录 =================
 SAVE_DIR = "saved_tables"
 os.makedirs(SAVE_DIR, exist_ok=True)
 
@@ -15,7 +14,7 @@ SHOW_FILE = f"{SAVE_DIR}/show_tables.json"
 SELECT_FILE = f"{SAVE_DIR}/select_options.json"
 NOTICE_FILE = f"{SAVE_DIR}/notice.json"
 
-# ================= 用户配置 =================
+# ================= 用户 =================
 SUPPLIER_CONFIG = {
     "恒尚": ["A小康先森"],
     "福蕾雅": ["严金虹"],
@@ -25,7 +24,7 @@ SUPPLIER_CONFIG = {
 ADMIN_USERS = {"admin"}
 USER_MAP = {u: k for k, v in SUPPLIER_CONFIG.items() for u in v}
 
-# ================= 工具函数 =================
+# ================= 工具 =================
 def load_json(path, default={}):
     if os.path.exists(path):
         return json.load(open(path, "r", encoding="utf-8"))
@@ -55,7 +54,6 @@ def get_tables():
         mp[label] = tid
     return sorted(opts, reverse=True), mp
 
-# ================= 公告栏 =================
 def load_notice():
     return load_json(NOTICE_FILE, {"text": ""}).get("text", "")
 
@@ -87,17 +85,6 @@ if not user:
 
 is_admin = user in ADMIN_USERS
 
-# ================= 公告栏显示 =================
-with st.sidebar:
-    st.subheader("📢 公告栏")
-    if is_admin:
-        notice_text = st.text_area("编辑公告", value=load_notice(), height=100)
-        if st.button("更新公告"):
-            save_notice(notice_text)
-            st.success("公告已更新")
-    else:
-        st.info(load_notice() or "暂无公告")
-
 # ================= 上传表格 =================
 if is_admin:
     st.sidebar.divider()
@@ -124,22 +111,32 @@ if is_admin:
 
         st.sidebar.success("上传完成")
 
-# ================= 表格列表 =================
+# ================= 表格选择 =================
 options, mp = get_tables()
 
 st.sidebar.divider()
 st.sidebar.subheader("表格列表")
-
 selected_label = st.sidebar.selectbox("选择表格查看", options)
 selected_tid = mp.get(selected_label)
 
+# ================= 公告栏（主页面表格上方显示） =================
+st.subheader("📢 公告栏")
+if is_admin:
+    notice_text = st.text_area("编辑公告", value=load_notice(), height=100)
+    if st.button("更新公告"):
+        save_notice(notice_text)
+        st.success("公告已更新")
+else:
+    st.info(load_notice() or "暂无公告")
+
+# ================= 表格展示 =================
 if selected_tid:
     df = load_excel(selected_tid)
     if df is not None:
         st.write(f"显示表格: {selected_label}")
         st.dataframe(df)
 
-        # 管理员可删除表格
+        # 管理员删除表格
         if is_admin:
             if st.button("删除该表格"):
                 os.remove(f"{SAVE_DIR}/{selected_tid}.xlsx")

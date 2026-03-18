@@ -3,8 +3,14 @@ import pandas as pd
 import os
 import json
 import hashlib
+from openai import OpenAI
 
-st.set_page_config(page_title="多表格管理系统", layout="wide")
+# 🔑 填你的key
+client = OpenAI(
+    api_key=st.secrets["OPENAI_API_KEY"]
+)
+
+st.set_page_config(page_title="多表格AI管理系统", layout="wide")
 
 SAVE_DIR = "saved_tables"
 os.makedirs(SAVE_DIR, exist_ok=True)
@@ -12,6 +18,43 @@ os.makedirs(SAVE_DIR, exist_ok=True)
 INDEX_FILE = f"{SAVE_DIR}/index.json"
 SHOW_FILE = f"{SAVE_DIR}/show_tables.json"
 SELECT_FILE = f"{SAVE_DIR}/select_options.json"
+
+# ================= GPT解析 =================
+def gpt_parse_command(user_input, columns):
+    prompt = f"""
+你是一个数据操作助手，需要把用户的中文指令解析成JSON。
+
+表格字段有：{columns}
+
+只返回JSON，不要解释。
+
+JSON格式：
+{{
+  "action": "update",
+  "filters": [
+    {{"column": "列名", "op": "=", "value": "值"}}
+  ],
+  "update": {{"column": "列名", "value": "新值"}}
+}}
+
+支持操作符：
+=, <, >, <=, >=
+
+用户指令：
+{user_input}
+"""
+    res = client.chat.completions.create(
+        model="gpt-4.1-mini",
+        messages=[{"role": "user", "content": prompt}],
+        temperature=0
+    )
+
+    text = res.choices[0].message.content
+
+    try:
+        return json.loads(text)
+    except:
+        return None
 
 # ================= 用户 =================
 SUPPLIER_CONFIG = {
@@ -24,10 +67,14 @@ ADMIN_USERS = {"admin"}
 USER_MAP = {u: k for k, v in SUPPLIER_CONFIG.items() for u in v}
 
 # ================= 工具 =================
-def load_json(path, default={}):
-    if os.path.exists(path):
-        return json.load(open(path, "r", encoding="utf-8"))
-    return default
+def load_json(path, default=None):
+    try:
+        if os.path.exists(path):
+            with open(path, "r", encoding="utf-8") as f:
+                return json.load(f)
+    except:
+        return {}
+    return {} if default is None else default
 
 def save_json(data, path):
     json.dump(data, open(path, "w", encoding="utf-8"), ensure_ascii=False, indent=2)
@@ -87,7 +134,7 @@ if is_admin:
 
     if st.sidebar.button("确认上传"):
         for f in files:
-            df = pd.read_excel(f)
+            df = pd.read_excel(f, dtype=str).fillna("")
             if "供应商简称" not in df.columns:
                 st.sidebar.error(f"{f.name}缺少列")
                 continue
@@ -107,7 +154,6 @@ if is_admin:
 # ================= 表格列表 =================
 options, mp = get_tables()
 
-# ⭐⭐⭐ 核心修复：用 tid 存展示 ⭐⭐⭐
 if is_admin:
     st.sidebar.divider()
 
@@ -130,9 +176,8 @@ else:
     show_tids = load_json(SHOW_FILE, [])
     options = [o for o in options if mp[o] in show_tids]
 
-# 没表直接退出
 if not options:
-    st.warning("没有可显示表格（请管理员先设置展示）")
+    st.warning("没有可显示表格")
     st.stop()
 
 sel = st.selectbox("选择表格", options)
@@ -140,56 +185,51 @@ tid = mp[sel]
 
 df = load_excel(tid)
 
-# ================= 商家过滤 =================
-if not is_admin:
-    supplier = USER_MAP[user]
-    df_edit = df[df["供应商简称"] == supplier].copy()
-else:
-    df_edit = df.copy()
-
-# ================= 下拉配置 =================
-select_all = load_json(SELECT_FILE, {})
-select_cfg = select_all.get(tid, {})
-
-column_config = {}
-for col, opts in select_cfg.items():
-    if col in df_edit.columns:
-        column_config[col] = st.column_config.SelectboxColumn(options=opts)
-
-# ================= 管理端配置下拉 =================
-if is_admin:
-    st.sidebar.divider()
-    st.sidebar.subheader("下拉配置")
-
-    col_select = st.sidebar.multiselect("选择列", df.columns.tolist())
-
-    new_cfg = {}
-    for col in col_select:
-        txt = st.sidebar.text_area(f"{col}选项（逗号分隔）", "")
-        new_cfg[col] = [i.strip() for i in txt.split(",") if i.strip()]
-
-    if st.sidebar.button("保存下拉"):
-        all_cfg = load_json(SELECT_FILE, {})
-        all_cfg[tid] = new_cfg
-        save_json(all_cfg, SELECT_FILE)
-        st.sidebar.success("已保存")
-        st.rerun()
-
 # ================= 表格 =================
-edited = st.data_editor(
-    df_edit,
-    use_container_width=True,
-    column_config=column_config,
-    key=f"editor_{tid}_{user}"
-)
+st.subheader("数据表")
+edited = st.data_editor(df, use_container_width=True)
 
-# ================= 保存 =================
 if st.button("保存"):
-    if is_admin:
-        save_excel(edited, tid)
-    else:
-        supplier = USER_MAP[user]
-        df.loc[df["供应商简称"] == supplier] = edited.values
-        save_excel(df, tid)
-
+    save_excel(edited, tid)
     st.success("保存成功")
+
+# ================= 🤖 AI助手 =================
+st.divider()
+st.subheader("🤖 AI助手")
+
+user_input = st.chat_input("比如：把库存小于10的商品改为缺货")
+
+if user_input:
+    cmd = gpt_parse_command(user_input, df.columns.tolist())
+
+    if not cmd:
+        st.error("AI解析失败")
+    else:
+        df_new = df.copy()
+
+        for f in cmd.get("filters", []):
+            col = f["column"]
+            op = f["op"]
+            val = f["value"]
+
+            if op == "=":
+                df_new = df_new[df_new[col] == str(val)]
+            else:
+                df_new = df_new[
+                    pd.to_numeric(df_new[col], errors="coerce")
+                    .fillna(0)
+                    .astype(float)
+                    .pipe(lambda s: eval(f"s {op} {val}"))
+                ]
+
+        upd = cmd.get("update", {})
+        if upd:
+            col = upd["column"]
+            val = upd["value"]
+
+            st.warning(f"即将修改 {len(df_new)} 行 → {col} = {val}")
+
+            if st.button("确认执行"):
+                df.loc[df_new.index, col] = val
+                save_excel(df, tid)
+                st.success("修改完成")

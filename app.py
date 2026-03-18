@@ -5,12 +5,12 @@ import json
 import hashlib
 import re
 import shutil
-import google.generativeai as genai
+import requests
 
 # 解决部署问题
 os.environ["STREAMLIT_SERVER_FILE_WATCHER_TYPE"] = "none"
 
-st.set_page_config(page_title="AI表格系统（Gemini版）", layout="wide")
+st.set_page_config(page_title="AI表格系统（DeepSeek版）", layout="wide")
 
 SAVE_DIR = "saved_tables"
 os.makedirs(SAVE_DIR, exist_ok=True)
@@ -103,14 +103,18 @@ def local_parse(text):
 
     return result
 
-# ================= Gemini =================
-def gemini_parse(user_input, columns):
+# ================= DeepSeek =================
+def deepseek_parse(user_input, columns):
     try:
-        genai.configure(api_key=st.secrets["GEMINI_API_KEY"])
-        model = genai.GenerativeModel("gemini-1.5-flash")
+        url = "https://api.deepseek.com/v1/chat/completions"
+
+        headers = {
+            "Authorization": f"Bearer {st.secrets['DEEPSEEK_API_KEY']}",
+            "Content-Type": "application/json"
+        }
 
         prompt = f"""
-把用户指令解析成JSON：
+你是表格AI助手，把用户指令解析为JSON：
 
 列：{columns}
 
@@ -123,10 +127,20 @@ def gemini_parse(user_input, columns):
 用户：{user_input}
 """
 
-        res = model.generate_content(prompt)
-        text = res.text.strip()
+        data = {
+            "model": "deepseek-chat",
+            "messages": [
+                {"role": "system", "content": "你是JSON解析器"},
+                {"role": "user", "content": prompt}
+            ],
+            "temperature": 0
+        }
+
+        res = requests.post(url, headers=headers, json=data)
+        text = res.json()["choices"][0]["message"]["content"]
 
         return json.loads(text)
+
     except:
         return None
 
@@ -212,9 +226,10 @@ st.subheader("🤖 AI助手")
 msg = st.text_input("输入：把库存小于10的商品改为缺货")
 
 if msg:
-    cmd = gemini_parse(msg, df.columns.tolist())
+    cmd = deepseek_parse(msg, df.columns.tolist())
 
     if not cmd:
+        st.warning("AI失败，使用本地规则")
         cmd = local_parse(msg)
 
     df_new = df.copy()

@@ -4,10 +4,13 @@ import os
 import json
 import hashlib
 import re
-import requests
 import shutil
+import google.generativeai as genai
 
-st.set_page_config(page_title="AI多表格管理系统", layout="wide")
+# 解决部署问题
+os.environ["STREAMLIT_SERVER_FILE_WATCHER_TYPE"] = "none"
+
+st.set_page_config(page_title="AI表格系统（Gemini版）", layout="wide")
 
 SAVE_DIR = "saved_tables"
 os.makedirs(SAVE_DIR, exist_ok=True)
@@ -80,38 +83,36 @@ def backup_table(tid):
 def match_column(col, columns):
     if col in columns:
         return col
-
     for c in columns:
         if col in c or c in col:
             return c
-
-    mapping = {
-        "库存": ["库存", "库存数量"],
-        "价格": ["价格", "单价"],
-        "状态": ["状态", "订单状态"],
-        "供应商": ["供应商", "供应商简称"]
-    }
-
-    for vals in mapping.values():
-        if col in vals:
-            for c in columns:
-                if c in vals:
-                    return c
     return None
 
-# ================= DeepSeek =================
-def deepseek_parse(user_input, columns):
+# ================= 本地AI（兜底） =================
+def local_parse(text):
+    result = {"filters": [], "update": {}}
+
+    if m := re.search(r"库存.*小于(\d+)", text):
+        result["filters"].append({"column": "库存", "op": "<", "value": m.group(1)})
+
+    if m := re.search(r"库存.*大于(\d+)", text):
+        result["filters"].append({"column": "库存", "op": ">", "value": m.group(1)})
+
+    if m := re.search(r"改为(.+)", text):
+        result["update"] = {"column": "状态", "value": m.group(1)}
+
+    return result
+
+# ================= Gemini =================
+def gemini_parse(user_input, columns):
     try:
-        url = "https://api.deepseek.com/chat/completions"
-        headers = {
-            "Authorization": f"Bearer {st.secrets['DEEPSEEK_API_KEY']}",
-            "Content-Type": "application/json"
-        }
+        genai.configure(api_key=st.secrets["GEMINI_API_KEY"])
+        model = genai.GenerativeModel("gemini-1.5-flash")
 
         prompt = f"""
-解析用户指令为JSON：
+把用户指令解析成JSON：
 
-字段：{columns}
+列：{columns}
 
 格式：
 {{
@@ -122,13 +123,10 @@ def deepseek_parse(user_input, columns):
 用户：{user_input}
 """
 
-        data = {
-            "model": "deepseek-chat",
-            "messages": [{"role": "user", "content": prompt}]
-        }
+        res = model.generate_content(prompt)
+        text = res.text.strip()
 
-        res = requests.post(url, headers=headers, json=data, timeout=10)
-        return json.loads(res.json()["choices"][0]["message"]["content"])
+        return json.loads(text)
     except:
         return None
 
@@ -211,32 +209,28 @@ if st.button("保存"):
 st.divider()
 st.subheader("🤖 AI助手")
 
-msg = st.chat_input("输入操作")
+msg = st.text_input("输入：把库存小于10的商品改为缺货")
 
 if msg:
-    cmd = deepseek_parse(msg, df.columns.tolist())
+    cmd = gemini_parse(msg, df.columns.tolist())
 
     if not cmd:
-        st.warning("AI失败")
-        st.stop()
+        cmd = local_parse(msg)
 
     df_new = df.copy()
 
     for f in cmd.get("filters", []):
         col = match_column(f["column"], df.columns)
         if not col:
-            st.error(f"列不存在: {f['column']}")
+            st.error("列不存在")
             st.stop()
 
-        if f["op"] == "=":
-            df_new = df_new[df_new[col] == str(f["value"])]
-        else:
-            df_new = df_new[
-                pd.to_numeric(df_new[col], errors="coerce")
-                .fillna(0)
-                .astype(float)
-                .pipe(lambda s: eval(f"s {f['op']} {f['value']}"))
-            ]
+        df_new = df_new[
+            pd.to_numeric(df_new[col], errors="coerce")
+            .fillna(0)
+            .astype(float)
+            .pipe(lambda s: eval(f"s {f['op']} {f['value']}"))
+        ]
 
     upd = cmd.get("update", {})
     col = match_column(upd.get("column", ""), df.columns)
@@ -247,7 +241,7 @@ if msg:
 
     val = upd.get("value")
 
-    st.warning(f"将修改 {len(df_new)} 行 → {col}={val}")
+    st.warning(f"将修改 {len(df_new)} 行 → {col} = {val}")
 
     if st.button("确认执行"):
         backup_table(tid)
@@ -255,7 +249,7 @@ if msg:
         save_excel(df, tid)
 
         add_log(user, tid, "AI修改", f"{len(df_new)}行 {col}={val}")
-        st.success("完成")
+        st.success("修改完成")
 
 # ================= 回滚 =================
 st.divider()

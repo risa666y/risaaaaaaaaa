@@ -67,11 +67,10 @@ if "user" not in st.session_state:
 with st.sidebar:
     st.title("🔐 登录")
 
-    # ===== 输入框 + 历史下拉 + 回车 =====
-    st.components.v1.html("""
+    login_val = st.components.v1.html("""
     <input list="userlist" id="user_input" placeholder="请输入用户名" style="width:100%;padding:6px;" />
     <datalist id="userlist"></datalist>
-    <button onclick="login()" style="width:100%;margin-top:5px;">登录</button>
+    <button onclick="sendLogin()" style="width:100%;margin-top:5px;">登录</button>
 
     <script>
     const input = document.getElementById("user_input");
@@ -91,26 +90,27 @@ with st.sidebar:
         input.value = arr[arr.length - 1];
     }
 
-    function login(){
+    function sendLogin(){
         const val = input.value;
-        window.location.search = "?login_user=" + encodeURIComponent(val);
+        const streamlitEvent = new CustomEvent("streamlit:setComponentValue", {
+            detail: val
+        });
+        window.dispatchEvent(streamlitEvent);
     }
 
     input.addEventListener("keydown", function(e){
         if(e.key === "Enter"){
-            login();
+            sendLogin();
         }
     });
     </script>
     """, height=120)
 
-    params = st.experimental_get_query_params()
-
-    if "login_user" in params:
-        username = params["login_user"][0]
+    if login_val:
+        username = login_val.strip()
 
         if username in ADMIN_USERS or username in USER_MAP:
-            # 保存历史
+
             st.components.v1.html(f"""
             <script>
             let arr = localStorage.getItem("saved_usernames");
@@ -125,7 +125,6 @@ with st.sidebar:
             """, height=0)
 
             st.session_state.user = username
-            st.experimental_set_query_params()
             st.rerun()
         else:
             st.error("用户不存在")

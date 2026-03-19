@@ -85,10 +85,14 @@ if not user:
 
 is_admin = user in ADMIN_USERS
 
-# ================= ⭐ 管理端自动刷新 =================
+# ================= ⭐ 管理端自动刷新（修复版） =================
 if is_admin:
-    time.sleep(3)
-    st.rerun()
+    if "last_refresh" not in st.session_state:
+        st.session_state.last_refresh = time.time()
+
+    if time.time() - st.session_state.last_refresh > 5:
+        st.session_state.last_refresh = time.time()
+        st.rerun()
 
 # ================= 上传 =================
 if is_admin:
@@ -262,6 +266,5 @@ def auto_save():
     st.success("✅ 已同步到管理端")
     st.rerun()
 
-# 保存按钮
 if st.button("💾 保存"):
     auto_save()

@@ -1,6 +1,7 @@
 import streamlit as st
 import pandas as pd
 import os, json, time
+from streamlit_autorefresh import st_autorefresh
 
 st.set_page_config(page_title="供应商填表系统", layout="wide")
 
@@ -17,7 +18,6 @@ SUPPLIER_CONFIG = {
     "杰祥": ["金刚小婷", "杰祥服饰"],
 }
 ADMIN_USERS = {"admin"}
-
 USER_MAP = {u.lower(): k for k, v in SUPPLIER_CONFIG.items() for u in v}
 
 # ===== 工具 =====
@@ -48,7 +48,7 @@ def load_excel(tid):
         return df
     return None
 
-# ===== 登录（侧边栏）=====
+# ===== 登录 =====
 with st.sidebar:
     st.title("🔐 登录")
     u = st.text_input("用户名")
@@ -154,11 +154,11 @@ with st.sidebar:
 # ===== 主界面 =====
 st.title("📊 供应商填表系统")
 
-# 自动刷新（管理员）
+# 自动刷新
 if is_admin:
-    st.autorefresh(interval=5000, key="refresh")
+    st_autorefresh(interval=5000, key="refresh")
 
-# 读取表
+# ===== 表格读取 =====
 idx = load_json(INDEX_FILE, {})
 
 options = []
@@ -204,7 +204,7 @@ for col, opts in select_cols.items():
 
 edited = st.data_editor(df, column_config=column_config, use_container_width=True)
 
-# ===== 保存（核心锁死逻辑）=====
+# ===== 保存（锁死逻辑）=====
 if st.button("💾 保存"):
 
     original = load_excel(tid).set_index("ID")
@@ -215,7 +215,6 @@ if st.button("💾 保存"):
 
         for i in edited.index:
 
-            # 不是自己行 → 禁止
             if edited.loc[i, "供应商简称"] != supplier:
                 edited.loc[i] = original.loc[i]
                 continue
@@ -225,7 +224,6 @@ if st.button("💾 保存"):
                 old = original.loc[i, col]
                 new = edited.loc[i, col]
 
-                # 🔒 已有值锁死
                 if pd.notna(old) and old != "":
                     edited.loc[i, col] = old
                 else:

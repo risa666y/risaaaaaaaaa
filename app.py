@@ -41,11 +41,8 @@ def load_excel(tid):
     path = f"{SAVE_DIR}/{tid}.xlsx"
     if os.path.exists(path):
         df = pd.read_excel(path, dtype=str).fillna("")
-
-        # ⭐ 强制ID（永不崩）
         if "ID" not in df.columns:
             df.insert(0, "ID", range(len(df)))
-
         return df.reset_index(drop=True)
     return pd.DataFrame()
 
@@ -135,7 +132,7 @@ if is_admin:
         st.sidebar.success("已保存")
         st.rerun()
 
-    # 删除
+    # 删除表
     st.sidebar.subheader("🗑 删除表格")
     del_table = st.sidebar.selectbox("选择删除", [""] + options)
 
@@ -222,11 +219,11 @@ edited = st.data_editor(
     use_container_width=True,
     height=600,
     column_config=column_config,
-    num_rows="fixed",  # ⭐ 禁止新增
+    num_rows="fixed",
     key=f"editor_{tid}_{user}"
 )
 
-# ================= 保存 =================
+# ================= 保存（核心：同步写入） =================
 def auto_save():
     key = f"editor_{tid}_{user}"
 
@@ -235,15 +232,11 @@ def auto_save():
 
     edited = st.session_state[key]
 
-    # ⭐ 核心修复：类型检查
-    if not isinstance(edited, pd.DataFrame):
-        return
-
-    if edited.empty:
+    if not isinstance(edited, pd.DataFrame) or edited.empty:
         return
 
     if "ID" not in edited.columns:
-        st.warning("缺少ID列")
+        st.warning("缺少ID")
         return
 
     full_df = load_excel(tid)
@@ -258,7 +251,7 @@ def auto_save():
         st.success("保存成功")
         return
 
-    # 商家
+    # 商家：允许同步（核心修改点）
     full_df = full_df.set_index("ID")
     edited = edited.set_index("ID")
 
@@ -267,14 +260,17 @@ def auto_save():
             continue
 
         for col in edited.columns:
-            if full_df.loc[i, col] == "":
-                full_df.loc[i, col] = edited.loc[i, col]
+            new_val = str(edited.loc[i, col]).strip()
+
+            # ⭐ 不允许空覆盖
+            if new_val != "":
+                full_df.loc[i, col] = new_val
 
     full_df = full_df.reset_index()
     save_excel(full_df, tid)
 
-    st.success("保存成功")
+    st.success("已同步到系统")
 
-# ⭐ 不用 on_click（更稳定）
+# 保存按钮
 if st.button("💾 保存"):
     auto_save()

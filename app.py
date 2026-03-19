@@ -40,8 +40,11 @@ def load_excel(tid):
         if "供应商简称" in df.columns:
             df["供应商简称"] = df["供应商简称"].astype(str).str.strip()
 
+        # ✅ 强制ID存在
         if "ID" not in df.columns:
             df.insert(0, "ID", range(len(df)))
+
+        df["ID"] = df["ID"].astype(str)
 
         return df
     return None
@@ -73,7 +76,6 @@ is_admin = user in ADMIN_USERS
 with st.sidebar:
     if is_admin:
 
-        # 上传
         st.divider()
         st.subheader("📤 上传表格")
 
@@ -93,6 +95,7 @@ with st.sidebar:
                     df["供应商简称"] = df["供应商简称"].astype(str).str.strip()
 
                 df.insert(0, "ID", range(len(df)))
+                df["ID"] = df["ID"].astype(str)
 
                 tid = str(int(time.time()))
                 save_excel(df, tid)
@@ -107,7 +110,7 @@ with st.sidebar:
                 st.success("上传成功")
                 st.rerun()
 
-        # 表格管理
+        # ===== 表格管理 =====
         st.divider()
         st.subheader("📂 表格管理")
 
@@ -149,7 +152,6 @@ with st.sidebar:
 
         if table_names:
             selected_table = st.selectbox("选择表", table_names)
-
             tid_map = {info["filename"]: tid for tid, info in idx.items()}
             tid_cfg = tid_map[selected_table]
 
@@ -157,11 +159,9 @@ with st.sidebar:
 
             if df_cfg is not None:
                 col = st.selectbox("选择列", df_cfg.columns)
-
                 options = st.text_area("选项（逗号分隔）")
 
                 if st.button("保存配置"):
-                    idx.setdefault(tid_cfg, {})
                     idx[tid_cfg].setdefault("select_cols", {})
                     idx[tid_cfg]["select_cols"][col] = [
                         x.strip() for x in options.split(",") if x.strip()
@@ -172,7 +172,7 @@ with st.sidebar:
 # ===== 主界面 =====
 st.title("📊 供应商填表系统")
 
-# 管理员自动刷新
+# 管理员自动刷新（不会影响登录）
 if is_admin:
     now = time.time()
     last = st.session_state.get("last_refresh", 0)
@@ -180,7 +180,7 @@ if is_admin:
         st.session_state.last_refresh = now
         st.rerun()
 
-# 表格选择
+# ===== 表格选择 =====
 idx = load_json(INDEX_FILE, {})
 options, mp = [], {}
 
@@ -198,7 +198,7 @@ tid = mp[table_name]
 
 df = load_excel(tid)
 
-# 商家过滤
+# ===== 商家过滤 =====
 if not is_admin:
     supplier = USER_MAP[user]
 
@@ -212,7 +212,7 @@ if not is_admin:
         st.error("没有你的数据")
         st.stop()
 
-# ===== 下拉应用 =====
+# ===== 下拉配置应用 =====
 select_cols = idx[tid].get("select_cols", {})
 column_config = {}
 
@@ -222,12 +222,20 @@ for col, opts in select_cols.items():
         options=opts
     )
 
-# ===== 自动保存 =====
+# ===== 自动保存（终极稳定版）=====
 def auto_save():
     path = f"{SAVE_DIR}/{tid}.xlsx"
 
     df_new = st.session_state["edited_df"]
     df_latest = pd.read_excel(path, dtype=str)
+
+    df_latest["ID"] = df_latest["ID"].astype(str)
+
+    # ✅ 防ID丢失
+    if "ID" not in df_new.columns:
+        df_new["ID"] = df_latest["ID"]
+
+    df_new["ID"] = df_new["ID"].astype(str)
 
     df_latest.set_index("ID", inplace=True)
     df_new = df_new.set_index("ID")
@@ -242,8 +250,8 @@ def auto_save():
 
     df_latest.reset_index().to_excel(path, index=False)
 
-# 表格
-edited = st.data_editor(
+# ===== 表格 =====
+st.data_editor(
     df,
     key="edited_df",
     column_config=column_config,

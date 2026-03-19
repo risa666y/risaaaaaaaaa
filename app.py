@@ -42,13 +42,14 @@ def load_excel(tid):
     if os.path.exists(path):
         df = pd.read_excel(path, dtype=str).fillna("")
 
-        # ⭐ 清洗数据（关键修复）
+        # ⭐ 修复空格问题
         df = df.applymap(lambda x: str(x).strip())
 
         if "ID" not in df.columns:
             df.insert(0, "ID", range(len(df)))
 
         return df.reset_index(drop=True)
+
     return pd.DataFrame()
 
 def get_tables():
@@ -115,7 +116,7 @@ if is_admin:
 # ================= 表格列表 =================
 options, mp = get_tables()
 
-# ================= 展示控制 =================
+# ================= 展示/删除 =================
 if is_admin:
     st.sidebar.subheader("👁️ 表格展示")
 
@@ -124,14 +125,30 @@ if is_admin:
 
     for label in options:
         tid_tmp = mp[label]
-        checked = tid_tmp in show_cfg
-        if st.sidebar.checkbox(label, value=checked):
+        if st.sidebar.checkbox(label, value=(tid_tmp in show_cfg)):
             new_show.append(tid_tmp)
 
     if st.sidebar.button("保存展示"):
         save_json(new_show, SHOW_FILE)
         st.sidebar.success("已保存")
         st.rerun()
+
+    # 删除
+    st.sidebar.subheader("🗑 删除表格")
+    del_label = st.sidebar.selectbox("选择删除", [""] + options)
+
+    if st.sidebar.button("删除"):
+        if del_label:
+            tid_del = mp[del_label]
+
+            os.remove(f"{SAVE_DIR}/{tid_del}.xlsx")
+
+            idx = load_json(INDEX_FILE, {})
+            idx.pop(tid_del, None)
+            save_json(idx, INDEX_FILE)
+
+            st.sidebar.success("已删除")
+            st.rerun()
 
 else:
     show_cfg = load_json(SHOW_FILE, [])
@@ -153,16 +170,55 @@ if not is_admin:
 else:
     df_edit = df.copy()
 
+# ================= 下拉配置 =================
+if is_admin:
+    st.sidebar.subheader("⚙️ 下拉配置")
+
+    select_all = load_json(SELECT_FILE, {})
+    old_cfg = select_all.get(tid, {})
+
+    cols = st.sidebar.multiselect(
+        "选择列",
+        df.columns.tolist(),
+        default=list(old_cfg.keys())
+    )
+
+    new_cfg = {}
+
+    for col in cols:
+        default_val = ",".join(old_cfg.get(col, []))
+        txt = st.sidebar.text_area(f"{col}选项", value=default_val)
+        new_cfg[col] = [i.strip() for i in txt.split(",") if i.strip()]
+
+    if st.sidebar.button("保存下拉"):
+        select_all[tid] = new_cfg
+        save_json(select_all, SELECT_FILE)
+        st.sidebar.success("已保存")
+        st.rerun()
+
+# ================= 应用下拉 =================
+select_all = load_json(SELECT_FILE, {})
+select_cfg = select_all.get(tid, {})
+
+column_config = {}
+
+if not is_admin and "供应商简称" in df_edit.columns:
+    column_config["供应商简称"] = st.column_config.TextColumn(disabled=True)
+
+for col, opts in select_cfg.items():
+    if col in df_edit.columns:
+        column_config[col] = st.column_config.SelectboxColumn(options=opts)
+
 # ================= 表格 =================
 edited = st.data_editor(
     df_edit,
     use_container_width=True,
     height=600,
-    num_rows="fixed",
+    column_config=column_config,
     key=f"editor_{tid}_{user}"
 )
 
-# ================= 保存（最终同步逻辑） =================
+# ================= 保存（核心修复） =================
 def auto_save():
     key = f"editor_{tid}_{user}"
 
@@ -174,12 +230,12 @@ def auto_save():
     if not isinstance(edited, pd.DataFrame) or edited.empty:
         return
 
-    full_df = load_excel(tid)
-
-    if full_df.empty:
+    if "ID" not in edited.columns:
+        st.error("缺少ID")
         return
 
-    # 管理员直接保存
+    full_df = load_excel(tid)
+
     if is_admin:
         save_excel(edited, tid)
         st.success("保存成功")
@@ -187,26 +243,23 @@ def auto_save():
 
     supplier = USER_MAP[user].strip()
 
-    # ⭐ 核心：按 ID + 供应商 精准更新
-    for _, row in edited.iterrows():
+    full_df = full_df.set_index("ID")
+    edited = edited.set_index("ID")
+
+    for i in edited.index:
+        if i not in full_df.index:
+            continue
 
         for col in edited.columns:
-            new_val = str(row[col]).strip()
+            new_val = str(edited.loc[i, col]).strip()
 
-            if new_val == "":
-                continue
+            if new_val != "":
+                full_df.loc[i, col] = new_val
 
-            mask = (
-                (full_df["ID"] == row["ID"]) &
-                (full_df["供应商简称"].str.strip() == supplier)
-            )
-
-            full_df.loc[mask, col] = new_val
-
+    full_df = full_df.reset_index()
     save_excel(full_df, tid)
 
     st.success("✅ 已同步到管理端")
 
-# 保存按钮
 if st.button("💾 保存"):
     auto_save()

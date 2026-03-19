@@ -64,47 +64,68 @@ def get_tables():
 if "user" not in st.session_state:
     st.session_state.user = None
 
-if "history_users" not in st.session_state:
-    st.session_state.history_users = []
-
 with st.sidebar:
     st.title("🔐 登录")
 
-    # ===== 历史账号选择 =====
-    selected_user = st.selectbox(
-        "历史账号",
-        [""] + st.session_state.history_users
-    )
-
-    username = st.text_input("用户名", value=selected_user)
-
-    # ===== 回车登录 =====
+    # ===== 输入框 + 历史下拉 + 回车 =====
     st.components.v1.html("""
+    <input list="userlist" id="user_input" placeholder="请输入用户名" style="width:100%;padding:6px;" />
+    <datalist id="userlist"></datalist>
+    <button onclick="login()" style="width:100%;margin-top:5px;">登录</button>
+
     <script>
-    const input = window.parent.document.querySelector('input');
-    if(input){
-        input.addEventListener("keydown", function(e){
-            if(e.key === "Enter"){
-                const btns = window.parent.document.querySelectorAll("button");
-                for(let b of btns){
-                    if(b.innerText.includes("登录")){
-                        b.click();
-                    }
-                }
-            }
-        });
+    const input = document.getElementById("user_input");
+    const datalist = document.getElementById("userlist");
+
+    let arr = localStorage.getItem("saved_usernames");
+    arr = arr ? JSON.parse(arr) : [];
+
+    datalist.innerHTML = "";
+    arr.forEach(u => {
+        let option = document.createElement("option");
+        option.value = u;
+        datalist.appendChild(option);
+    });
+
+    if(arr.length > 0){
+        input.value = arr[arr.length - 1];
     }
+
+    function login(){
+        const val = input.value;
+        window.location.search = "?login_user=" + encodeURIComponent(val);
+    }
+
+    input.addEventListener("keydown", function(e){
+        if(e.key === "Enter"){
+            login();
+        }
+    });
     </script>
-    """, height=0)
+    """, height=120)
 
-    if st.button("登录"):
+    params = st.experimental_get_query_params()
+
+    if "login_user" in params:
+        username = params["login_user"][0]
+
         if username in ADMIN_USERS or username in USER_MAP:
+            # 保存历史
+            st.components.v1.html(f"""
+            <script>
+            let arr = localStorage.getItem("saved_usernames");
+            arr = arr ? JSON.parse(arr) : [];
 
-            # 记录历史（仅当前会话）
-            if username not in st.session_state.history_users:
-                st.session_state.history_users.append(username)
+            if(!arr.includes("{username}")) {{
+                arr.push("{username}");
+            }}
+
+            localStorage.setItem("saved_usernames", JSON.stringify(arr));
+            </script>
+            """, height=0)
 
             st.session_state.user = username
+            st.experimental_set_query_params()
             st.rerun()
         else:
             st.error("用户不存在")

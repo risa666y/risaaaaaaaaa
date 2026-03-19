@@ -66,10 +66,50 @@ if "user" not in st.session_state:
 
 with st.sidebar:
     st.title("🔐 登录")
-    username = st.text_input("用户名")
+
+    # ===== 本地记忆 + 回车登录 =====
+    st.components.v1.html("""
+    <script>
+    const input = window.parent.document.querySelector('input[type="text"]');
+
+    if (input) {
+        const saved = localStorage.getItem("saved_usernames");
+        if (saved) {
+            const arr = JSON.parse(saved);
+            if (arr.length > 0) {
+                input.value = arr[arr.length - 1];
+            }
+        }
+
+        input.addEventListener("keydown", function(e) {
+            if (e.key === "Enter") {
+                const btn = window.parent.document.querySelector('button[kind="secondary"]');
+                if (btn) btn.click();
+            }
+        });
+    }
+    </script>
+    """, height=0)
+
+    username = st.text_input("用户名", key="login_user")
 
     if st.button("登录"):
         if username in ADMIN_USERS or username in USER_MAP:
+
+            # 写入本地缓存
+            st.components.v1.html(f"""
+            <script>
+            let arr = localStorage.getItem("saved_usernames");
+            arr = arr ? JSON.parse(arr) : [];
+
+            if (!arr.includes("{username}")) {{
+                arr.push("{username}");
+            }}
+
+            localStorage.setItem("saved_usernames", JSON.stringify(arr));
+            </script>
+            """, height=0)
+
             st.session_state.user = username
             st.rerun()
         else:
@@ -217,9 +257,9 @@ edited = st.data_editor(
     key=f"editor_{tid}_{user}"
 )
 
-# ================= 保存（修复核心） =================
+# ================= 保存 =================
 def auto_save():
-    global edited  # ⭐关键修复
+    global edited
 
     if edited is None or edited.empty:
         st.warning("没有可保存的数据")
@@ -256,7 +296,7 @@ def auto_save():
 if st.button("💾 保存"):
     auto_save()
 
-# ================= ⭐ 管理端实时刷新（最后执行） =================
+# ================= 管理端实时刷新 =================
 if is_admin:
     auto = st.sidebar.checkbox("开启实时同步", value=True)
 

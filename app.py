@@ -42,12 +42,12 @@ def load_excel(tid):
     if os.path.exists(path):
         df = pd.read_excel(path, dtype=str).fillna("")
 
-        # ⭐ 永不崩关键：强制ID
+        # ⭐ 强制ID（永不崩）
         if "ID" not in df.columns:
             df.insert(0, "ID", range(len(df)))
 
         return df.reset_index(drop=True)
-    return None
+    return pd.DataFrame()
 
 def get_tables():
     idx = load_json(INDEX_FILE, {})
@@ -135,7 +135,7 @@ if is_admin:
         st.sidebar.success("已保存")
         st.rerun()
 
-    # 删除表
+    # 删除
     st.sidebar.subheader("🗑 删除表格")
     del_table = st.sidebar.selectbox("选择删除", [""] + options)
 
@@ -156,7 +156,7 @@ else:
     options = [o for o in options if mp[o] in show_cfg]
 
 if not options:
-    st.warning("暂无可用表格")
+    st.warning("暂无表格")
     st.stop()
 
 # ================= 选表 =================
@@ -189,7 +189,6 @@ if is_admin:
 
     for col in cols:
         default_val = ",".join(old_cfg.get(col, []))
-
         txt = st.sidebar.text_area(f"{col}选项", value=default_val)
         new_cfg[col] = [i.strip() for i in txt.split(",") if i.strip()]
 
@@ -205,10 +204,10 @@ select_cfg = select_all.get(tid, {})
 
 column_config = {}
 
-# ⭐ 锁ID（防崩）
+# 锁ID
 column_config["ID"] = st.column_config.TextColumn(disabled=True)
 
-# ⭐ 锁供应商（商家）
+# 锁供应商
 if not is_admin and "供应商简称" in df_edit.columns:
     column_config["供应商简称"] = st.column_config.TextColumn(disabled=True)
 
@@ -223,40 +222,51 @@ edited = st.data_editor(
     use_container_width=True,
     height=600,
     column_config=column_config,
-    num_rows="fixed",  # ⭐ 禁止新增（关键）
+    num_rows="fixed",  # ⭐ 禁止新增
     key=f"editor_{tid}_{user}"
 )
 
 # ================= 保存 =================
 def auto_save():
     key = f"editor_{tid}_{user}"
-    edited = st.session_state.get(key)
 
-    if edited is None or len(edited) == 0:
+    if key not in st.session_state:
         return
 
-    # ⭐ 防崩：必须有ID
+    edited = st.session_state[key]
+
+    # ⭐ 核心修复：类型检查
+    if not isinstance(edited, pd.DataFrame):
+        return
+
+    if edited.empty:
+        return
+
     if "ID" not in edited.columns:
-        st.error("数据异常：缺少ID")
+        st.warning("缺少ID列")
         return
 
     full_df = load_excel(tid)
 
-    if "ID" not in full_df.columns:
+    if full_df.empty or "ID" not in full_df.columns:
         st.error("原始数据异常")
         return
 
+    # 管理员
     if is_admin:
         save_excel(edited, tid)
         st.success("保存成功")
         return
 
+    # 商家
     full_df = full_df.set_index("ID")
     edited = edited.set_index("ID")
 
     for i in edited.index:
+        if i not in full_df.index:
+            continue
+
         for col in edited.columns:
-            # ⭐ 只允许填空
             if full_df.loc[i, col] == "":
                 full_df.loc[i, col] = edited.loc[i, col]
 
@@ -265,4 +275,6 @@ def auto_save():
 
     st.success("保存成功")
 
-st.button("💾 保存", on_click=auto_save)
+# ⭐ 不用 on_click（更稳定）
+if st.button("💾 保存"):
+    auto_save()

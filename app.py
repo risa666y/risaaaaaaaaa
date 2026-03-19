@@ -73,39 +73,48 @@ is_admin = user in ADMIN_USERS
 # ===== 管理端侧边栏 =====
 with st.sidebar:
     if is_admin:
+
+        # ===== 上传 =====
         st.divider()
         st.subheader("📤 上传表格")
 
         file = st.file_uploader("上传Excel", type=["xlsx"])
 
         if file:
-            df = pd.read_excel(file, dtype=str)
-            df = df.dropna(how="all")
-            df.columns = df.columns.str.strip()
-
-            if "供应商简称" in df.columns:
-                df["供应商简称"] = df["供应商简称"].astype(str).str.strip()
-
-            df.insert(0, "ID", range(len(df)))
-
-            tid = str(int(time.time()))
-            save_excel(df, tid)
-
             idx = load_json(INDEX_FILE, {})
-            idx[tid] = {
-                "filename": file.name,
-                "visible": True,
-                "select_cols": {}
-            }
-            save_json(idx, INDEX_FILE)
 
-            st.success("上传成功")
+            # 防重复上传
+            if file.name in [i["filename"] for i in idx.values()]:
+                st.warning("该表已存在")
+            else:
+                df = pd.read_excel(file, dtype=str)
+                df = df.dropna(how="all")
+                df.columns = df.columns.str.strip()
 
-        # ===== 表格管理 =====
+                if "供应商简称" in df.columns:
+                    df["供应商简称"] = df["供应商简称"].astype(str).str.strip()
+
+                df.insert(0, "ID", range(len(df)))
+
+                tid = str(int(time.time()))
+                save_excel(df, tid)
+
+                idx[tid] = {
+                    "filename": file.name,
+                    "visible": True,
+                    "select_cols": {}
+                }
+                save_json(idx, INDEX_FILE)
+
+                st.success("上传成功")
+                st.rerun()
+
+        # ===== 表格管理（已修复重复问题）=====
         st.divider()
         st.subheader("📂 表格管理")
 
         idx = load_json(INDEX_FILE, {})
+        updated = False
 
         for tid, info in list(idx.items()):
             col1, col2, col3 = st.columns([2,1,1])
@@ -119,7 +128,10 @@ with st.sidebar:
                     value=info.get("visible", True),
                     key=f"vis_{tid}"
                 )
-                idx[tid]["visible"] = visible
+
+                if visible != info.get("visible", True):
+                    idx[tid]["visible"] = visible
+                    updated = True
 
             with col3:
                 if st.button("删除", key=f"del_{tid}"):
@@ -128,7 +140,8 @@ with st.sidebar:
                     save_json(idx, INDEX_FILE)
                     st.rerun()
 
-        save_json(idx, INDEX_FILE)
+        if updated:
+            save_json(idx, INDEX_FILE)
 
         # ===== 下拉配置 =====
         st.divider()
@@ -163,7 +176,7 @@ with st.sidebar:
 # ===== 主界面 =====
 st.title("📊 供应商填表系统")
 
-# 管理员手动刷新
+# 管理员刷新
 if is_admin:
     if st.button("🔄 刷新数据"):
         load_excel_cached.clear()
@@ -203,7 +216,7 @@ if not is_admin:
         st.error("没有你的数据")
         st.stop()
 
-# ===== 下拉列应用 =====
+# ===== 下拉列 =====
 select_cols = idx[tid].get("select_cols", {})
 
 column_config = {}

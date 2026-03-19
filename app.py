@@ -1,7 +1,6 @@
 import streamlit as st
 import pandas as pd
 import os, json, time
-from streamlit_autorefresh import st_autorefresh
 
 st.set_page_config(page_title="供应商填表系统", layout="wide")
 
@@ -32,7 +31,8 @@ def save_json(data, path):
 def save_excel(df, tid):
     df.to_excel(f"{SAVE_DIR}/{tid}.xlsx", index=False)
 
-def load_excel(tid):
+@st.cache_data
+def load_excel_cached(tid):
     path = f"{SAVE_DIR}/{tid}.xlsx"
     if os.path.exists(path):
         df = pd.read_excel(path, dtype=str)
@@ -129,34 +129,14 @@ with st.sidebar:
 
         save_json(idx, INDEX_FILE)
 
-        # ===== 下拉配置 =====
-        st.divider()
-        st.subheader("⚙️ 下拉配置")
-
-        table_names = [info["filename"] for info in idx.values()]
-        if table_names:
-            selected_table = st.selectbox("选择表", table_names)
-
-            tid_map = {info["filename"]: tid for tid, info in idx.items()}
-            tid_cfg = tid_map[selected_table]
-
-            df_cfg = load_excel(tid_cfg)
-
-            col = st.selectbox("选择列", df_cfg.columns)
-            options = st.text_area("选项（逗号分隔）")
-
-            if st.button("保存配置"):
-                idx[tid_cfg].setdefault("select_cols", {})
-                idx[tid_cfg]["select_cols"][col] = options.split(",")
-                save_json(idx, INDEX_FILE)
-                st.success("已保存")
-
 # ===== 主界面 =====
 st.title("📊 供应商填表系统")
 
-# 自动刷新
+# 管理员刷新按钮
 if is_admin:
-    st_autorefresh(interval=5000, key="refresh")
+    if st.button("🔄 刷新数据"):
+        load_excel_cached.clear()
+        st.rerun()
 
 # ===== 表格读取 =====
 idx = load_json(INDEX_FILE, {})
@@ -176,7 +156,7 @@ if not options:
 table_name = st.selectbox("选择表格", options)
 tid = mp[table_name]
 
-df = load_excel(tid)
+df = load_excel_cached(tid)
 
 # ===== 商家过滤 =====
 if not is_admin:
@@ -192,22 +172,13 @@ if not is_admin:
         st.error("没有你的数据")
         st.stop()
 
-# ===== 下拉列 =====
-select_cols = idx[tid].get("select_cols", {})
+# ===== 编辑 =====
+edited = st.data_editor(df, use_container_width=True)
 
-column_config = {}
-for col, opts in select_cols.items():
-    column_config[col] = st.column_config.SelectboxColumn(
-        col,
-        options=opts
-    )
-
-edited = st.data_editor(df, column_config=column_config, use_container_width=True)
-
-# ===== 保存（锁死逻辑）=====
+# ===== 保存（锁死逻辑 + 无感刷新）=====
 if st.button("💾 保存"):
 
-    original = load_excel(tid).set_index("ID")
+    original = load_excel_cached(tid).set_index("ID")
     edited = edited.set_index("ID")
 
     if not is_admin:
@@ -232,4 +203,9 @@ if st.button("💾 保存"):
     original.update(edited)
     save_excel(original.reset_index(), tid)
 
+    # ✅ 清缓存 + 无感刷新
+    load_excel_cached.clear()
+
     st.success("保存成功")
+    time.sleep(0.5)
+    st.rerun()

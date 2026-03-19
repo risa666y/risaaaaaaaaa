@@ -2,7 +2,6 @@ import streamlit as st
 import pandas as pd
 import os
 import json
-import time
 
 DATA_DIR = "data"
 CONFIG_FILE = "select_options.json"
@@ -22,11 +21,9 @@ if st.sidebar.button("退出"):
     st.session_state.clear()
 
 user = st.session_state.get("user")
-
-# ================= 角色 =================
 is_admin = user == "admin"
 
-# ================= 初始化配置 =================
+# ================= 初始化 =================
 if not os.path.exists(CONFIG_FILE):
     json.dump({}, open(CONFIG_FILE, "w"))
 
@@ -36,7 +33,6 @@ if not os.path.exists(SHOW_FILE):
 select_config = json.load(open(CONFIG_FILE))
 show_tables = json.load(open(SHOW_FILE))
 
-# ================= 标题 =================
 st.title("📊 供应商填表系统")
 
 # ================= 上传 =================
@@ -48,7 +44,10 @@ if is_admin:
         path = os.path.join(DATA_DIR, file.name)
         if not os.path.exists(path):
             df = pd.read_excel(file)
-            df.insert(0, "ID", range(len(df)))  # ✅ 永远有ID
+
+            if "ID" not in df.columns:
+                df.insert(0, "ID", range(len(df)))
+
             df.to_excel(path, index=False)
 
             show_tables[file.name] = True
@@ -58,14 +57,16 @@ if is_admin:
         else:
             st.sidebar.warning("文件已存在")
 
-# ================= 表格列表 =================
+# ================= 表格管理 =================
 files = os.listdir(DATA_DIR)
 
-visible_tables = []
 st.sidebar.header("📂 表格管理")
+
+visible_tables = []
 
 for f in files:
     show = show_tables.get(f, True)
+
     col1, col2 = st.sidebar.columns([1,1])
 
     with col1:
@@ -84,27 +85,25 @@ for f in files:
 
 json.dump(show_tables, open(SHOW_FILE, "w"))
 
-# ================= 无表处理 =================
 if not visible_tables:
-    st.warning("暂无可用表格")
+    st.warning("暂无表格")
     st.stop()
 
-# ================= 选择表 =================
+# ================= 选表 =================
 table_name = st.selectbox("选择表格", visible_tables)
 
 file_path = os.path.join(DATA_DIR, table_name)
 df = pd.read_excel(file_path)
 
-# ✅ 防止ID丢失
+# 保证ID存在
 if "ID" not in df.columns:
     df.insert(0, "ID", range(len(df)))
 
 df = df.fillna("")
 
 # ================= 商家过滤 =================
-if not is_admin:
-    if "供应商名称" in df.columns:
-        df = df[df["供应商名称"] == user]
+if not is_admin and "供应商名称" in df.columns:
+    df = df[df["供应商名称"] == user]
 
 # ================= 下拉配置 =================
 st.sidebar.header("⚙️ 下拉配置")
@@ -119,45 +118,34 @@ if is_admin:
             json.dump(select_config, open(CONFIG_FILE, "w"))
             st.sidebar.success("已保存")
 
-# ================= 表格编辑 =================
-edited_df = df.copy()
-
+# ================= 表格编辑（核心UI） =================
 st.write("✏️ 编辑数据（自动保存）")
 
-for i in range(len(df)):
-    cols = st.columns(len(df.columns))
+editable_cols = []
 
-    for j, col in enumerate(df.columns):
+if is_admin:
+    editable_cols = df.columns.tolist()
+else:
+    for col in df.columns:
+        if df[col].astype(str).eq("").any():
+            editable_cols.append(col)
 
-        value = df.iloc[i][col]
+# 下拉列处理
+column_config = {}
 
-        # 管理员：全可编辑
-        if is_admin:
-            if col in select_config:
-                edited_df.iloc[i, j] = cols[j].selectbox(
-                    "", select_config[col],
-                    index=select_config[col].index(value) if value in select_config[col] else 0,
-                    key=f"{i}_{col}"
-                )
-            else:
-                edited_df.iloc[i, j] = cols[j].text_input(
-                    "", value, key=f"{i}_{col}"
-                )
+for col, opts in select_config.items():
+    if col in df.columns:
+        column_config[col] = st.column_config.SelectboxColumn(
+            options=opts
+        )
 
-        # 商家：只能填空
-        else:
-            if value == "":
-                if col in select_config:
-                    edited_df.iloc[i, j] = cols[j].selectbox(
-                        "", select_config[col],
-                        key=f"{i}_{col}"
-                    )
-                else:
-                    edited_df.iloc[i, j] = cols[j].text_input(
-                        "", value, key=f"{i}_{col}"
-                    )
-            else:
-                cols[j].write(value)
+edited_df = st.data_editor(
+    df,
+    use_container_width=True,
+    num_rows="fixed",
+    disabled=[c for c in df.columns if c not in editable_cols],
+    column_config=column_config
+)
 
 # ================= 自动保存（稳定版） =================
 def safe_save():
@@ -177,5 +165,4 @@ def safe_save():
     except Exception as e:
         st.error(f"保存失败: {e}")
 
-# ✅ 每次操作自动保存（无刷新）
 safe_save()

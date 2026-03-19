@@ -42,7 +42,7 @@ def load_excel(tid):
     if os.path.exists(path):
         df = pd.read_excel(path, dtype=str).fillna("")
 
-        # ⭐ ID机制（核心）
+        # ⭐ 永不崩关键：强制ID
         if "ID" not in df.columns:
             df.insert(0, "ID", range(len(df)))
 
@@ -114,7 +114,7 @@ if is_admin:
 # ================= 表格列表 =================
 options, mp = get_tables()
 
-# ================= 展示控制（checkbox） =================
+# ================= 展示控制 =================
 if is_admin:
     st.sidebar.divider()
     st.sidebar.subheader("👁️ 表格展示控制")
@@ -171,10 +171,10 @@ if not is_admin:
 else:
     df_edit = df.copy()
 
-# ================= ⭐ 下拉配置（修复缺失） =================
+# ================= 下拉配置 =================
 if is_admin:
     st.sidebar.divider()
-    st.sidebar.subheader("⚙️ 下拉选项配置")
+    st.sidebar.subheader("⚙️ 下拉配置")
 
     select_all = load_json(SELECT_FILE, {})
     old_cfg = select_all.get(tid, {})
@@ -190,35 +190,32 @@ if is_admin:
     for col in cols:
         default_val = ",".join(old_cfg.get(col, []))
 
-        txt = st.sidebar.text_area(
-            f"{col} 选项（逗号分隔）",
-            value=default_val
-        )
-
+        txt = st.sidebar.text_area(f"{col}选项", value=default_val)
         new_cfg[col] = [i.strip() for i in txt.split(",") if i.strip()]
 
-    if st.sidebar.button("保存下拉配置"):
+    if st.sidebar.button("保存下拉"):
         select_all[tid] = new_cfg
         save_json(select_all, SELECT_FILE)
         st.sidebar.success("已保存")
         st.rerun()
 
-# ================= 下拉应用 =================
+# ================= 应用下拉 =================
 select_all = load_json(SELECT_FILE, {})
 select_cfg = select_all.get(tid, {})
 
 column_config = {}
 
-# 锁供应商列（商家）
+# ⭐ 锁ID（防崩）
+column_config["ID"] = st.column_config.TextColumn(disabled=True)
+
+# ⭐ 锁供应商（商家）
 if not is_admin and "供应商简称" in df_edit.columns:
     column_config["供应商简称"] = st.column_config.TextColumn(disabled=True)
 
-# 下拉列
+# 下拉
 for col, opts in select_cfg.items():
     if col in df_edit.columns:
-        column_config[col] = st.column_config.SelectboxColumn(
-            options=opts[:200]  # 防卡
-        )
+        column_config[col] = st.column_config.SelectboxColumn(options=opts[:200])
 
 # ================= 表格 =================
 edited = st.data_editor(
@@ -226,30 +223,46 @@ edited = st.data_editor(
     use_container_width=True,
     height=600,
     column_config=column_config,
+    num_rows="fixed",  # ⭐ 禁止新增（关键）
     key=f"editor_{tid}_{user}"
 )
 
 # ================= 保存 =================
 def auto_save():
-    edited = st.session_state[f"editor_{tid}_{user}"]
+    key = f"editor_{tid}_{user}"
+    edited = st.session_state.get(key)
+
+    if edited is None or len(edited) == 0:
+        return
+
+    # ⭐ 防崩：必须有ID
+    if "ID" not in edited.columns:
+        st.error("数据异常：缺少ID")
+        return
+
     full_df = load_excel(tid)
+
+    if "ID" not in full_df.columns:
+        st.error("原始数据异常")
+        return
 
     if is_admin:
         save_excel(edited, tid)
+        st.success("保存成功")
         return
-
-    supplier = USER_MAP[user]
 
     full_df = full_df.set_index("ID")
     edited = edited.set_index("ID")
 
     for i in edited.index:
         for col in edited.columns:
-            # ⭐ 只允许填空白
+            # ⭐ 只允许填空
             if full_df.loc[i, col] == "":
                 full_df.loc[i, col] = edited.loc[i, col]
 
     full_df = full_df.reset_index()
     save_excel(full_df, tid)
+
+    st.success("保存成功")
 
 st.button("💾 保存", on_click=auto_save)

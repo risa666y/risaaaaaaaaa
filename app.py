@@ -42,7 +42,7 @@ def load_excel(tid):
     if os.path.exists(path):
         df = pd.read_excel(path, dtype=str).fillna("")
 
-        # ⭐ 必须有ID
+        # ⭐ ID机制（核心）
         if "ID" not in df.columns:
             df.insert(0, "ID", range(len(df)))
 
@@ -63,7 +63,7 @@ if "user" not in st.session_state:
     st.session_state.user = None
 
 with st.sidebar:
-    st.title("登录")
+    st.title("🔐 登录")
     username = st.text_input("用户名")
 
     if st.button("登录"):
@@ -86,6 +86,8 @@ is_admin = user in ADMIN_USERS
 # ================= 上传 =================
 if is_admin:
     st.sidebar.divider()
+    st.sidebar.subheader("📤 上传表格")
+
     files = st.sidebar.file_uploader("上传Excel", type=["xlsx"], accept_multiple_files=True)
 
     if st.sidebar.button("确认上传"):
@@ -109,35 +111,41 @@ if is_admin:
         st.sidebar.success("上传完成")
         st.rerun()
 
-# ================= 表格管理 =================
+# ================= 表格列表 =================
 options, mp = get_tables()
 
+# ================= 展示控制（checkbox） =================
 if is_admin:
     st.sidebar.divider()
-    st.sidebar.subheader("表格控制")
+    st.sidebar.subheader("👁️ 表格展示控制")
 
     show_cfg = load_json(SHOW_FILE, [])
+    new_show = []
 
-    selected = st.sidebar.multiselect(
-        "展示表格",
-        options,
-        default=[o for o in options if mp[o] in show_cfg]
-    )
+    for label in options:
+        tid_tmp = mp[label]
+        checked = tid_tmp in show_cfg
+        show = st.sidebar.checkbox(label, value=checked)
+
+        if show:
+            new_show.append(tid_tmp)
 
     if st.sidebar.button("保存展示"):
-        save_json([mp[o] for o in selected], SHOW_FILE)
+        save_json(new_show, SHOW_FILE)
         st.sidebar.success("已保存")
         st.rerun()
 
-    # 删除
-    del_table = st.sidebar.selectbox("删除表格", [""] + options)
-    if st.sidebar.button("删除"):
+    # 删除表
+    st.sidebar.subheader("🗑 删除表格")
+    del_table = st.sidebar.selectbox("选择删除", [""] + options)
+
+    if st.sidebar.button("删除表格"):
         if del_table:
-            tid = mp[del_table]
-            os.remove(f"{SAVE_DIR}/{tid}.xlsx")
+            tid_del = mp[del_table]
+            os.remove(f"{SAVE_DIR}/{tid_del}.xlsx")
 
             idx = load_json(INDEX_FILE, {})
-            idx.pop(tid, None)
+            idx.pop(tid_del, None)
             save_json(idx, INDEX_FILE)
 
             st.sidebar.success("已删除")
@@ -148,7 +156,7 @@ else:
     options = [o for o in options if mp[o] in show_cfg]
 
 if not options:
-    st.warning("暂无表格")
+    st.warning("暂无可用表格")
     st.stop()
 
 # ================= 选表 =================
@@ -163,29 +171,54 @@ if not is_admin:
 else:
     df_edit = df.copy()
 
-# ================= 下拉配置 =================
+# ================= ⭐ 下拉配置（修复缺失） =================
+if is_admin:
+    st.sidebar.divider()
+    st.sidebar.subheader("⚙️ 下拉选项配置")
+
+    select_all = load_json(SELECT_FILE, {})
+    old_cfg = select_all.get(tid, {})
+
+    cols = st.sidebar.multiselect(
+        "选择列",
+        df.columns.tolist(),
+        default=list(old_cfg.keys())
+    )
+
+    new_cfg = {}
+
+    for col in cols:
+        default_val = ",".join(old_cfg.get(col, []))
+
+        txt = st.sidebar.text_area(
+            f"{col} 选项（逗号分隔）",
+            value=default_val
+        )
+
+        new_cfg[col] = [i.strip() for i in txt.split(",") if i.strip()]
+
+    if st.sidebar.button("保存下拉配置"):
+        select_all[tid] = new_cfg
+        save_json(select_all, SELECT_FILE)
+        st.sidebar.success("已保存")
+        st.rerun()
+
+# ================= 下拉应用 =================
 select_all = load_json(SELECT_FILE, {})
 select_cfg = select_all.get(tid, {})
 
 column_config = {}
 
-# 锁供应商列
-if "供应商简称" in df_edit.columns and not is_admin:
+# 锁供应商列（商家）
+if not is_admin and "供应商简称" in df_edit.columns:
     column_config["供应商简称"] = st.column_config.TextColumn(disabled=True)
 
 # 下拉列
 for col, opts in select_cfg.items():
     if col in df_edit.columns:
-        column_config[col] = st.column_config.SelectboxColumn(options=opts)
-
-# ================= ⭐ 只允许填空白 =================
-disabled_cols = {}
-
-if not is_admin:
-    for col in df_edit.columns:
-        if col not in select_cfg:
-            # 非下拉列 → 只能填空
-            disabled_cols[col] = st.column_config.TextColumn(disabled=False)
+        column_config[col] = st.column_config.SelectboxColumn(
+            options=opts[:200]  # 防卡
+        )
 
 # ================= 表格 =================
 edited = st.data_editor(
@@ -196,27 +229,27 @@ edited = st.data_editor(
     key=f"editor_{tid}_{user}"
 )
 
-# ================= 自动保存 =================
+# ================= 保存 =================
 def auto_save():
     edited = st.session_state[f"editor_{tid}_{user}"]
-
     full_df = load_excel(tid)
 
     if is_admin:
         save_excel(edited, tid)
         return
 
-    # ⭐ 只更新当前行 + 空值填充
+    supplier = USER_MAP[user]
+
     full_df = full_df.set_index("ID")
     edited = edited.set_index("ID")
 
     for i in edited.index:
         for col in edited.columns:
+            # ⭐ 只允许填空白
             if full_df.loc[i, col] == "":
                 full_df.loc[i, col] = edited.loc[i, col]
 
     full_df = full_df.reset_index()
     save_excel(full_df, tid)
 
-# 触发保存
 st.button("💾 保存", on_click=auto_save)

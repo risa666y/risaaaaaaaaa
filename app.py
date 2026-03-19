@@ -217,16 +217,12 @@ edited = st.data_editor(
     key=f"editor_{tid}_{user}"
 )
 
-# ================= 保存 =================
+# ================= 保存（修复核心） =================
 def auto_save():
-    key = f"editor_{tid}_{user}"
+    global edited  # ⭐关键修复
 
-    if key not in st.session_state:
-        return
-
-    edited = st.session_state[key]
-
-    if not isinstance(edited, pd.DataFrame) or edited.empty:
+    if edited is None or edited.empty:
+        st.warning("没有可保存的数据")
         return
 
     full_df = load_excel(tid)
@@ -260,7 +256,7 @@ def auto_save():
 if st.button("💾 保存"):
     auto_save()
 
-# ================= ⭐ 管理端实时刷新（放最后，关键） =================
+# ================= ⭐ 管理端实时刷新（最后执行） =================
 if is_admin:
     auto = st.sidebar.checkbox("开启实时同步", value=True)
 

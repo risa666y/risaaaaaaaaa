@@ -2,233 +2,221 @@ import streamlit as st
 import pandas as pd
 import os
 import json
+import hashlib
 
 st.set_page_config(layout="wide")
 
-DATA_DIR = "data"
-CONFIG_FILE = "dropdown_config.json"
-COLUMN_FILE = "column_visible.json"
+SAVE_DIR = "saved_tables"
+os.makedirs(SAVE_DIR, exist_ok=True)
 
-os.makedirs(DATA_DIR, exist_ok=True)
+INDEX_FILE = f"{SAVE_DIR}/index.json"
+SHOW_FILE = f"{SAVE_DIR}/show_tables.json"
+SELECT_FILE = f"{SAVE_DIR}/select_options.json"
 
-# -----------------------
-# 初始化
-# -----------------------
-if "logged_in" not in st.session_state:
-    st.session_state.logged_in = False
+# ================= 用户 =================
+SUPPLIER_CONFIG = {
+    "恒尚": ["A小康先森"],
+    "福蕾雅": ["严金虹"],
+    "杰祥": ["金刚小婷", "杰祥服饰"]
+}
+ADMIN_USERS = {"admin"}
+USER_MAP = {u: k for k, v in SUPPLIER_CONFIG.items() for u in v}
 
-# -----------------------
-# 工具函数
-# -----------------------
-def load_dropdown_config():
-    if os.path.exists(CONFIG_FILE):
-        with open(CONFIG_FILE, "r", encoding="utf-8") as f:
-            return json.load(f)
-    return {}
+# ================= 工具 =================
+def load_json(path, default):
+    if os.path.exists(path):
+        return json.load(open(path, "r", encoding="utf-8"))
+    return default
 
-def save_dropdown_config(config):
-    with open(CONFIG_FILE, "w", encoding="utf-8") as f:
-        json.dump(config, f, ensure_ascii=False, indent=2)
+def save_json(data, path):
+    json.dump(data, open(path, "w", encoding="utf-8"), ensure_ascii=False, indent=2)
 
-def load_column_config():
-    if os.path.exists(COLUMN_FILE):
-        with open(COLUMN_FILE, "r", encoding="utf-8") as f:
-            return json.load(f)
-    return {}
+def gen_id(name):
+    return hashlib.md5((name+str(pd.Timestamp.now())).encode()).hexdigest()[:10]
 
-def save_column_config(config):
-    with open(COLUMN_FILE, "w", encoding="utf-8") as f:
-        json.dump(config, f, ensure_ascii=False, indent=2)
+def save_excel(df, tid):
+    df.to_excel(f"{SAVE_DIR}/{tid}.xlsx", index=False)
 
-def list_files():
-    return [f for f in os.listdir(DATA_DIR) if f.endswith(".xlsx")]
+def load_excel(tid):
+    path = f"{SAVE_DIR}/{tid}.xlsx"
+    if os.path.exists(path):
+        df = pd.read_excel(path, dtype=str).fillna("")
 
-def load_excel(file):
-    path = os.path.join(DATA_DIR, file)
-    try:
-        df = pd.read_excel(path)
-    except Exception as e:
-        st.error(f"读取失败: {e}")
-        return pd.DataFrame()
+        # ⭐ 必须有ID
+        if "ID" not in df.columns:
+            df.insert(0, "ID", range(len(df)))
 
-    if "ID" not in df.columns:
-        df.insert(0, "ID", range(len(df)))
+        return df.reset_index(drop=True)
+    return None
 
-    return df.reset_index(drop=True)
+def get_tables():
+    idx = load_json(INDEX_FILE, {})
+    opts, mp = [], {}
+    for tid, info in idx.items():
+        label = f"{info['upload_time']} | {info['filename']}"
+        opts.append(label)
+        mp[label] = tid
+    return sorted(opts, reverse=True), mp
 
-def save_excel(file, df):
-    path = os.path.join(DATA_DIR, file)
-    df.to_excel(path, index=False)
+# ================= 登录 =================
+if "user" not in st.session_state:
+    st.session_state.user = None
 
-# -----------------------
-# 登录
-# -----------------------
-st.sidebar.title("🔐 登录")
+with st.sidebar:
+    st.title("登录")
+    username = st.text_input("用户名")
 
-username = st.sidebar.text_input("用户名")
+    if st.button("登录"):
+        if username in ADMIN_USERS or username in USER_MAP:
+            st.session_state.user = username
+            st.rerun()
+        else:
+            st.error("用户不存在")
 
-if st.sidebar.button("登录"):
-    if username.strip():
-        st.session_state.logged_in = True
-        st.session_state.user = username
+    if st.button("退出"):
+        st.session_state.user = None
         st.rerun()
 
-if st.sidebar.button("退出"):
-    st.session_state.logged_in = False
-    st.rerun()
-
-if not st.session_state.logged_in:
-    st.warning("请先登录")
+user = st.session_state.user
+if not user:
     st.stop()
 
-# -----------------------
-# 上传
-# -----------------------
-st.sidebar.title("📤 上传表格")
+is_admin = user in ADMIN_USERS
 
-uploaded = st.sidebar.file_uploader("上传 Excel", type=["xlsx"])
+# ================= 上传 =================
+if is_admin:
+    st.sidebar.divider()
+    files = st.sidebar.file_uploader("上传Excel", type=["xlsx"], accept_multiple_files=True)
 
-if uploaded:
-    save_path = os.path.join(DATA_DIR, uploaded.name)
-    with open(save_path, "wb") as f:
-        f.write(uploaded.read())
-    st.sidebar.success("上传/覆盖成功")
+    if st.sidebar.button("确认上传"):
+        for f in files:
+            df = pd.read_excel(f)
 
-# -----------------------
-# 表格管理
-# -----------------------
-st.sidebar.title("📁 表格管理")
+            if "供应商简称" not in df.columns:
+                st.sidebar.error(f"{f.name}缺少【供应商简称】列")
+                continue
 
-files = list_files()
-for f in files:
-    st.sidebar.write("✔", f)
+            tid = gen_id(f.name)
+            save_excel(df, tid)
 
-# -----------------------
-# 下拉配置
-# -----------------------
-st.sidebar.title("⚙️ 下拉配置")
+            idx = load_json(INDEX_FILE, {})
+            idx[tid] = {
+                "filename": f.name,
+                "upload_time": str(pd.Timestamp.now())
+            }
+            save_json(idx, INDEX_FILE)
 
-config = load_dropdown_config()
+        st.sidebar.success("上传完成")
+        st.rerun()
 
-col_name = st.sidebar.text_input("列名")
-options = st.sidebar.text_area("选项（逗号分隔）")
+# ================= 表格管理 =================
+options, mp = get_tables()
 
-if st.sidebar.button("保存下拉"):
-    if col_name and options:
-        config[col_name] = [x.strip() for x in options.split(",")]
-        save_dropdown_config(config)
+if is_admin:
+    st.sidebar.divider()
+    st.sidebar.subheader("表格控制")
+
+    show_cfg = load_json(SHOW_FILE, [])
+
+    selected = st.sidebar.multiselect(
+        "展示表格",
+        options,
+        default=[o for o in options if mp[o] in show_cfg]
+    )
+
+    if st.sidebar.button("保存展示"):
+        save_json([mp[o] for o in selected], SHOW_FILE)
         st.sidebar.success("已保存")
+        st.rerun()
 
-if st.sidebar.button("删除下拉"):
-    if col_name in config:
-        del config[col_name]
-        save_dropdown_config(config)
-        st.sidebar.success("已删除")
+    # 删除
+    del_table = st.sidebar.selectbox("删除表格", [""] + options)
+    if st.sidebar.button("删除"):
+        if del_table:
+            tid = mp[del_table]
+            os.remove(f"{SAVE_DIR}/{tid}.xlsx")
 
-# -----------------------
-# 主界面
-# -----------------------
-st.title("📊 供应商填表系统")
+            idx = load_json(INDEX_FILE, {})
+            idx.pop(tid, None)
+            save_json(idx, INDEX_FILE)
 
-if not files:
-    st.warning("请先上传 Excel")
+            st.sidebar.success("已删除")
+            st.rerun()
+
+else:
+    show_cfg = load_json(SHOW_FILE, [])
+    options = [o for o in options if mp[o] in show_cfg]
+
+if not options:
+    st.warning("暂无表格")
     st.stop()
 
-selected_file = st.selectbox("选择表格", files)
+# ================= 选表 =================
+sel = st.selectbox("选择表格", options)
+tid = mp[sel]
+df = load_excel(tid)
 
-df = load_excel(selected_file)
+# ================= 权限过滤 =================
+if not is_admin:
+    supplier = USER_MAP[user]
+    df_edit = df[df["供应商简称"] == supplier].copy()
+else:
+    df_edit = df.copy()
 
-# -----------------------
-# ⭐ 列显示控制（关键功能）
-# -----------------------
-st.sidebar.title("👁️ 列显示控制")
+# ================= 下拉配置 =================
+select_all = load_json(SELECT_FILE, {})
+select_cfg = select_all.get(tid, {})
 
-column_config = load_column_config()
+column_config = {}
 
-all_cols = df.columns.tolist()
+# 锁供应商列
+if "供应商简称" in df_edit.columns and not is_admin:
+    column_config["供应商简称"] = st.column_config.TextColumn(disabled=True)
 
-default_cols = column_config.get(selected_file, all_cols)
+# 下拉列
+for col, opts in select_cfg.items():
+    if col in df_edit.columns:
+        column_config[col] = st.column_config.SelectboxColumn(options=opts)
 
-visible_cols = st.sidebar.multiselect(
-    "选择显示列",
-    all_cols,
-    default=default_cols
+# ================= ⭐ 只允许填空白 =================
+disabled_cols = {}
+
+if not is_admin:
+    for col in df_edit.columns:
+        if col not in select_cfg:
+            # 非下拉列 → 只能填空
+            disabled_cols[col] = st.column_config.TextColumn(disabled=False)
+
+# ================= 表格 =================
+edited = st.data_editor(
+    df_edit,
+    use_container_width=True,
+    height=600,
+    column_config=column_config,
+    key=f"editor_{tid}_{user}"
 )
 
-if st.sidebar.button("保存列配置"):
-    column_config[selected_file] = visible_cols
-    save_column_config(column_config)
-    st.sidebar.success("已保存列配置")
-
-# 显示用 df
-df_display = df[visible_cols] if visible_cols else df
-
-# -----------------------
-# 自动保存（安全版）
-# -----------------------
+# ================= 自动保存 =================
 def auto_save():
-    edited = st.session_state["editor"]
+    edited = st.session_state[f"editor_{tid}_{user}"]
 
-    if edited is None or len(edited) == 0:
+    full_df = load_excel(tid)
+
+    if is_admin:
+        save_excel(edited, tid)
         return
 
-    if "ID" not in edited.columns:
-        return
-
-    full_df = load_excel(selected_file)
-
+    # ⭐ 只更新当前行 + 空值填充
     full_df = full_df.set_index("ID")
     edited = edited.set_index("ID")
 
-    full_df.update(edited)
+    for i in edited.index:
+        for col in edited.columns:
+            if full_df.loc[i, col] == "":
+                full_df.loc[i, col] = edited.loc[i, col]
 
     full_df = full_df.reset_index()
+    save_excel(full_df, tid)
 
-    save_excel(selected_file, full_df)
-
-# -----------------------
-# 表格显示
-# -----------------------
-st.markdown("### ✏️ 编辑数据（自动保存）")
-
-st.data_editor(
-    df_display,
-    key="editor",
-    use_container_width=True,
-    height=600,
-    num_rows="dynamic",
-    on_change=auto_save,
-    column_config={
-        col: st.column_config.SelectboxColumn(
-            options=config.get(col, [])[:200]  # 限制数量避免卡顿
-        )
-        for col in df_display.columns
-        if col in config
-    }
-)
-
-# -----------------------
-# ⭐ CSS 修复（关键）
-# -----------------------
-st.markdown("""
-<style>
-
-/* 表格撑满 */
-div[data-testid="stDataEditor"] {
-    width: 100% !important;
-    overflow-x: auto !important;
-}
-
-/* 不换行 */
-div[data-testid="stDataEditor"] td {
-    white-space: nowrap !important;
-}
-
-/* ⭐ 修复下拉滚动 */
-ul[role="listbox"] {
-    max-height: 300px !important;
-    overflow-y: auto !important;
-}
-
-</style>
-""", unsafe_allow_html=True)
+# 触发保存
+st.button("💾 保存", on_click=auto_save)

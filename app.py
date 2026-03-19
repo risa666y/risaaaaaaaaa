@@ -4,7 +4,6 @@ import os, json, time
 
 st.set_page_config(page_title="供应商填表系统", layout="wide")
 
-# ===== 路径 =====
 SAVE_DIR = "saved_tables"
 os.makedirs(SAVE_DIR, exist_ok=True)
 INDEX_FILE = f"{SAVE_DIR}/index.json"
@@ -28,36 +27,35 @@ def save_json(data, path):
     json.dump(data, open(path, "w", encoding="utf-8"), ensure_ascii=False)
 
 def save_excel(df, tid):
-    df.to_excel(f"{SAVE_DIR}/{tid}.xlsx", index=False)
+    path = f"{SAVE_DIR}/{tid}.xlsx"
+    df.to_excel(path, index=False)
 
 def load_excel(tid):
     path = f"{SAVE_DIR}/{tid}.xlsx"
-    if os.path.exists(path):
-        df = pd.read_excel(path, dtype=str)
-        df = df.dropna(how="all")
-        df.columns = df.columns.str.strip()
+    if not os.path.exists(path):
+        return None
 
-        if "供应商简称" in df.columns:
-            df["供应商简称"] = df["供应商简称"].astype(str).str.strip()
+    df = pd.read_excel(path, dtype=str)
+    df = df.dropna(how="all")
+    df.columns = df.columns.str.strip()
 
-        # ✅ 强制ID存在
-        if "ID" not in df.columns:
-            df.insert(0, "ID", range(len(df)))
+    if "供应商简称" in df.columns:
+        df["供应商简称"] = df["供应商简称"].astype(str).str.strip()
 
-        df["ID"] = df["ID"].astype(str)
+    if "ID" not in df.columns:
+        df.insert(0, "ID", range(len(df)))
 
-        return df
-    return None
+    df["ID"] = df["ID"].astype(str)
+    return df
 
 # ===== 登录 =====
 with st.sidebar:
-    st.title("🔐 登录")
+    st.title("登录")
     u = st.text_input("用户名")
 
     if st.button("登录"):
         if u.lower() in ADMIN_USERS or u.lower() in USER_MAP:
             st.session_state.user = u.lower()
-            st.session_state.last_refresh = time.time()
             st.rerun()
         else:
             st.error("用户不存在")
@@ -72,189 +70,82 @@ if not user:
 
 is_admin = user in ADMIN_USERS
 
-# ===== 管理端侧边栏 =====
+# ===== 上传 =====
 with st.sidebar:
     if is_admin:
-
-        st.divider()
-        st.subheader("📤 上传表格")
-
+        st.subheader("上传表格")
         file = st.file_uploader("上传Excel", type=["xlsx"])
 
         if file:
             idx = load_json(INDEX_FILE, {})
+            df = pd.read_excel(file, dtype=str)
+            df.insert(0, "ID", range(len(df)))
 
-            if file.name in [i["filename"] for i in idx.values()]:
-                st.warning("该表已存在")
-            else:
-                df = pd.read_excel(file, dtype=str)
-                df = df.dropna(how="all")
-                df.columns = df.columns.str.strip()
+            tid = str(int(time.time()))
+            save_excel(df, tid)
 
-                if "供应商简称" in df.columns:
-                    df["供应商简称"] = df["供应商简称"].astype(str).str.strip()
-
-                df.insert(0, "ID", range(len(df)))
-                df["ID"] = df["ID"].astype(str)
-
-                tid = str(int(time.time()))
-                save_excel(df, tid)
-
-                idx[tid] = {
-                    "filename": file.name,
-                    "visible": True,
-                    "select_cols": {}
-                }
-                save_json(idx, INDEX_FILE)
-
-                st.success("上传成功")
-                st.rerun()
-
-        # ===== 表格管理 =====
-        st.divider()
-        st.subheader("📂 表格管理")
-
-        idx = load_json(INDEX_FILE, {})
-        updated = False
-
-        for tid, info in list(idx.items()):
-            col1, col2, col3 = st.columns([2,1,1])
-
-            with col1:
-                st.write(info["filename"])
-
-            with col2:
-                visible = st.checkbox(
-                    "显示",
-                    value=info.get("visible", True),
-                    key=f"vis_{tid}"
-                )
-
-                if visible != info.get("visible", True):
-                    idx[tid]["visible"] = visible
-                    updated = True
-
-            with col3:
-                if st.button("删除", key=f"del_{tid}"):
-                    os.remove(f"{SAVE_DIR}/{tid}.xlsx")
-                    idx.pop(tid)
-                    save_json(idx, INDEX_FILE)
-                    st.rerun()
-
-        if updated:
+            idx[tid] = {"filename": file.name, "visible": True}
             save_json(idx, INDEX_FILE)
 
-        # ===== 下拉配置 =====
-        st.divider()
-        st.subheader("⚙️ 下拉配置")
-
-        table_names = [info["filename"] for info in idx.values()]
-
-        if table_names:
-            selected_table = st.selectbox("选择表", table_names)
-            tid_map = {info["filename"]: tid for tid, info in idx.items()}
-            tid_cfg = tid_map[selected_table]
-
-            df_cfg = load_excel(tid_cfg)
-
-            if df_cfg is not None:
-                col = st.selectbox("选择列", df_cfg.columns)
-                options = st.text_area("选项（逗号分隔）")
-
-                if st.button("保存配置"):
-                    idx[tid_cfg].setdefault("select_cols", {})
-                    idx[tid_cfg]["select_cols"][col] = [
-                        x.strip() for x in options.split(",") if x.strip()
-                    ]
-                    save_json(idx, INDEX_FILE)
-                    st.success("已保存")
-
-# ===== 主界面 =====
-st.title("📊 供应商填表系统")
-
-# 管理员自动刷新（不会影响登录）
-if is_admin:
-    now = time.time()
-    last = st.session_state.get("last_refresh", 0)
-    if now - last > 2:
-        st.session_state.last_refresh = now
-        st.rerun()
+            st.success("上传成功")
+            st.rerun()
 
 # ===== 表格选择 =====
 idx = load_json(INDEX_FILE, {})
-options, mp = [], {}
-
-for tid, info in idx.items():
-    if info.get("visible", True):
-        options.append(info["filename"])
-        mp[info["filename"]] = tid
-
-if not options:
-    st.warning("暂无表格")
-    st.stop()
+options = [i["filename"] for i in idx.values()]
+tid_map = {i["filename"]: k for k, i in idx.items()}
 
 table_name = st.selectbox("选择表格", options)
-tid = mp[table_name]
+tid = tid_map[table_name]
 
 df = load_excel(tid)
 
 # ===== 商家过滤 =====
 if not is_admin:
     supplier = USER_MAP[user]
-
-    if "供应商简称" not in df.columns:
-        st.error("缺少供应商列")
-        st.stop()
-
     df = df[df["供应商简称"] == supplier]
 
-    if df.empty:
-        st.error("没有你的数据")
-        st.stop()
+if df is None or df.empty:
+    st.warning("无数据")
+    st.stop()
 
-# ===== 下拉配置应用 =====
-select_cols = idx[tid].get("select_cols", {})
-column_config = {}
+# ===== 版本控制 =====
+file_path = f"{SAVE_DIR}/{tid}.xlsx"
+file_mtime = os.path.getmtime(file_path)
 
-for col, opts in select_cols.items():
-    column_config[col] = st.column_config.SelectboxColumn(
-        col,
-        options=opts
-    )
+if "last_mtime" not in st.session_state:
+    st.session_state.last_mtime = file_mtime
 
-# ===== 自动保存（终极稳定版）=====
-def auto_save():
-    path = f"{SAVE_DIR}/{tid}.xlsx"
+# ===== 编辑器 =====
+edited = st.data_editor(df, use_container_width=True, key="editor")
 
-    df_new = st.session_state["edited_df"]
-    df_latest = pd.read_excel(path, dtype=str)
+# ===== 自动保存（企业稳定版）=====
+if not edited.equals(df):
 
-    df_latest["ID"] = df_latest["ID"].astype(str)
+    # 冲突检测
+    current_mtime = os.path.getmtime(file_path)
 
-    # ✅ 防ID丢失
-    if "ID" not in df_new.columns:
-        df_new["ID"] = df_latest["ID"]
+    if current_mtime != st.session_state.last_mtime:
+        st.warning("⚠️ 数据已被他人修改，已自动刷新")
+        st.rerun()
 
-    df_new["ID"] = df_new["ID"].astype(str)
-
+    df_latest = pd.read_excel(file_path, dtype=str)
     df_latest.set_index("ID", inplace=True)
-    df_new = df_new.set_index("ID")
 
+    edited = edited.set_index("ID")
+
+    # 商家限制
     if not is_admin:
-        supplier = USER_MAP[user]
-        df_new = df_new[df_new["供应商简称"] == supplier]
+        edited = edited[edited["供应商简称"] == supplier]
 
-    for i in df_new.index:
-        for col in df_new.columns:
-            df_latest.loc[i, col] = df_new.loc[i, col]
+    # 只更新变化值
+    for i in edited.index:
+        for col in edited.columns:
+            if df_latest.loc[i, col] != edited.loc[i, col]:
+                df_latest.loc[i, col] = edited.loc[i, col]
 
-    df_latest.reset_index().to_excel(path, index=False)
+    df_latest.reset_index().to_excel(file_path, index=False)
 
-# ===== 表格 =====
-st.data_editor(
-    df,
-    key="edited_df",
-    column_config=column_config,
-    use_container_width=True,
-    on_change=auto_save
-)
+    st.session_state.last_mtime = os.path.getmtime(file_path)
+
+    st.toast("已自动保存")

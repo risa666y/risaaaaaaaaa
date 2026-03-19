@@ -91,7 +91,7 @@ with st.sidebar:
     }
 
     function sendLogin(){
-        const val = input.value;
+        const val = input.value || "";
         const streamlitEvent = new CustomEvent("streamlit:setComponentValue", {
             detail: val
         });
@@ -106,11 +106,13 @@ with st.sidebar:
     </script>
     """, height=120)
 
-    if login_val:
-        username = login_val.strip()
+    # ✅ 修复 None 报错（关键）
+    if login_val is not None and str(login_val).strip() != "":
+        username = str(login_val).strip()
 
         if username in ADMIN_USERS or username in USER_MAP:
 
+            # 保存历史
             st.components.v1.html(f"""
             <script>
             let arr = localStorage.getItem("saved_usernames");

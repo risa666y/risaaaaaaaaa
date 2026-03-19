@@ -44,10 +44,8 @@ def load_excel(tid):
         df = pd.read_excel(path, dtype=str).fillna("")
         df = df.applymap(lambda x: str(x).strip())
 
-        # ✅ 修复ID（稳定唯一）
         if "ID" not in df.columns:
-            import uuid
-            df.insert(0, "ID", [str(uuid.uuid4()) for _ in range(len(df))])
+            df.insert(0, "ID", range(len(df)))
 
         return df.reset_index(drop=True)
 
@@ -86,14 +84,6 @@ if not user:
     st.stop()
 
 is_admin = user in ADMIN_USERS
-
-# ================= ⭐ 管理端强制实时刷新（关键修复） =================
-if is_admin:
-    auto = st.sidebar.checkbox("开启实时同步", value=True)
-
-    if auto:
-        time.sleep(2)
-        st.rerun()
 
 # ================= 上传 =================
 if is_admin:
@@ -214,9 +204,6 @@ column_config = {}
 if not is_admin and "供应商简称" in df_edit.columns:
     column_config["供应商简称"] = st.column_config.TextColumn(disabled=True)
 
-if "ID" in df_edit.columns:
-    column_config["ID"] = st.column_config.TextColumn(disabled=True)
-
 for col, opts in select_cfg.items():
     if col in df_edit.columns:
         column_config[col] = st.column_config.SelectboxColumn(options=opts)
@@ -251,12 +238,8 @@ def auto_save():
         return
 
     supplier = USER_MAP[user].strip()
-    allowed_ids = set(df_edit["ID"])
 
     for _, row in edited.iterrows():
-        if row["ID"] not in allowed_ids:
-            continue
-
         for col in edited.columns:
             new_val = str(row[col]).strip()
             if new_val == "":
@@ -276,3 +259,11 @@ def auto_save():
 
 if st.button("💾 保存"):
     auto_save()
+
+# ================= ⭐ 管理端实时刷新（放最后，关键） =================
+if is_admin:
+    auto = st.sidebar.checkbox("开启实时同步", value=True)
+
+    if auto:
+        time.sleep(2)
+        st.rerun()

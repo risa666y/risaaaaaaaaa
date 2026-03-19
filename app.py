@@ -64,51 +64,45 @@ def get_tables():
 if "user" not in st.session_state:
     st.session_state.user = None
 
+if "history_users" not in st.session_state:
+    st.session_state.history_users = []
+
 with st.sidebar:
     st.title("🔐 登录")
 
-    # ===== 本地记忆 + 回车登录 =====
+    # ===== 历史账号选择 =====
+    selected_user = st.selectbox(
+        "历史账号",
+        [""] + st.session_state.history_users
+    )
+
+    username = st.text_input("用户名", value=selected_user)
+
+    # ===== 回车登录 =====
     st.components.v1.html("""
     <script>
-    const input = window.parent.document.querySelector('input[type="text"]');
-
-    if (input) {
-        const saved = localStorage.getItem("saved_usernames");
-        if (saved) {
-            const arr = JSON.parse(saved);
-            if (arr.length > 0) {
-                input.value = arr[arr.length - 1];
-            }
-        }
-
-        input.addEventListener("keydown", function(e) {
-            if (e.key === "Enter") {
-                const btn = window.parent.document.querySelector('button[kind="secondary"]');
-                if (btn) btn.click();
+    const input = window.parent.document.querySelector('input');
+    if(input){
+        input.addEventListener("keydown", function(e){
+            if(e.key === "Enter"){
+                const btns = window.parent.document.querySelectorAll("button");
+                for(let b of btns){
+                    if(b.innerText.includes("登录")){
+                        b.click();
+                    }
+                }
             }
         });
     }
     </script>
     """, height=0)
 
-    username = st.text_input("用户名", key="login_user")
-
     if st.button("登录"):
         if username in ADMIN_USERS or username in USER_MAP:
 
-            # 写入本地缓存
-            st.components.v1.html(f"""
-            <script>
-            let arr = localStorage.getItem("saved_usernames");
-            arr = arr ? JSON.parse(arr) : [];
-
-            if (!arr.includes("{username}")) {{
-                arr.push("{username}");
-            }}
-
-            localStorage.setItem("saved_usernames", JSON.stringify(arr));
-            </script>
-            """, height=0)
+            # 记录历史（仅当前会话）
+            if username not in st.session_state.history_users:
+                st.session_state.history_users.append(username)
 
             st.session_state.user = username
             st.rerun()

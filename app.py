@@ -3,6 +3,7 @@ import pandas as pd
 import os
 import json
 import hashlib
+import time
 
 st.set_page_config(layout="wide")
 
@@ -41,8 +42,6 @@ def load_excel(tid):
     path = f"{SAVE_DIR}/{tid}.xlsx"
     if os.path.exists(path):
         df = pd.read_excel(path, dtype=str).fillna("")
-
-        # ⭐ 修复空格问题
         df = df.applymap(lambda x: str(x).strip())
 
         if "ID" not in df.columns:
@@ -86,6 +85,11 @@ if not user:
 
 is_admin = user in ADMIN_USERS
 
+# ================= ⭐ 管理端自动刷新 =================
+if is_admin:
+    time.sleep(3)
+    st.rerun()
+
 # ================= 上传 =================
 if is_admin:
     st.sidebar.subheader("📤 上传表格")
@@ -116,7 +120,7 @@ if is_admin:
 # ================= 表格列表 =================
 options, mp = get_tables()
 
-# ================= 展示/删除 =================
+# ================= 展示 / 删除 =================
 if is_admin:
     st.sidebar.subheader("👁️ 表格展示")
 
@@ -133,7 +137,6 @@ if is_admin:
         st.sidebar.success("已保存")
         st.rerun()
 
-    # 删除
     st.sidebar.subheader("🗑 删除表格")
     del_label = st.sidebar.selectbox("选择删除", [""] + options)
 
@@ -141,7 +144,8 @@ if is_admin:
         if del_label:
             tid_del = mp[del_label]
 
-            os.remove(f"{SAVE_DIR}/{tid_del}.xlsx")
+            if os.path.exists(f"{SAVE_DIR}/{tid_del}.xlsx"):
+                os.remove(f"{SAVE_DIR}/{tid_del}.xlsx")
 
             idx = load_json(INDEX_FILE, {})
             idx.pop(tid_del, None)
@@ -163,7 +167,7 @@ sel = st.selectbox("选择表格", options)
 tid = mp[sel]
 df = load_excel(tid)
 
-# ================= 权限过滤 =================
+# ================= 权限 =================
 if not is_admin:
     supplier = USER_MAP[user].strip()
     df_edit = df[df["供应商简称"].str.strip() == supplier].copy()
@@ -218,7 +222,7 @@ edited = st.data_editor(
     key=f"editor_{tid}_{user}"
 )
 
-# ================= 保存（核心修复） =================
+# ================= 保存 =================
 def auto_save():
     key = f"editor_{tid}_{user}"
 
@@ -230,36 +234,34 @@ def auto_save():
     if not isinstance(edited, pd.DataFrame) or edited.empty:
         return
 
-    if "ID" not in edited.columns:
-        st.error("缺少ID")
-        return
-
     full_df = load_excel(tid)
 
     if is_admin:
         save_excel(edited, tid)
         st.success("保存成功")
+        st.rerun()
         return
 
     supplier = USER_MAP[user].strip()
 
-    full_df = full_df.set_index("ID")
-    edited = edited.set_index("ID")
-
-    for i in edited.index:
-        if i not in full_df.index:
-            continue
-
+    for _, row in edited.iterrows():
         for col in edited.columns:
-            new_val = str(edited.loc[i, col]).strip()
+            new_val = str(row[col]).strip()
+            if new_val == "":
+                continue
 
-            if new_val != "":
-                full_df.loc[i, col] = new_val
+            mask = (
+                (full_df["ID"] == row["ID"]) &
+                (full_df["供应商简称"].str.strip() == supplier)
+            )
 
-    full_df = full_df.reset_index()
+            full_df.loc[mask, col] = new_val
+
     save_excel(full_df, tid)
 
     st.success("✅ 已同步到管理端")
+    st.rerun()
 
+# 保存按钮
 if st.button("💾 保存"):
     auto_save()

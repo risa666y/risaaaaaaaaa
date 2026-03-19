@@ -18,7 +18,9 @@ SUPPLIER_CONFIG = {
     "杰祥": ["金刚小婷", "杰祥服饰"],
 }
 ADMIN_USERS = {"admin"}
-USER_MAP = {u: k for k, v in SUPPLIER_CONFIG.items() for u in v}
+
+# 小写统一（防止输错）
+USER_MAP = {u.lower(): k for k, v in SUPPLIER_CONFIG.items() for u in v}
 
 # ===== 工具 =====
 def load_json(path, default={}):
@@ -35,7 +37,20 @@ def save_excel(df, tid):
 def load_excel(tid):
     path = f"{SAVE_DIR}/{tid}.xlsx"
     if os.path.exists(path):
-        return pd.read_excel(path, dtype=str)
+        df = pd.read_excel(path, dtype=str)
+
+        # ✅ 清洗
+        df = df.dropna(how="all")
+        df.columns = df.columns.astype(str).str.strip()
+
+        if "供应商简称" in df.columns:
+            df["供应商简称"] = df["供应商简称"].astype(str).str.strip()
+
+        # ✅ 加ID防错位
+        if "ID" not in df.columns:
+            df.insert(0, "ID", range(len(df)))
+
+        return df
     return None
 
 def get_tables():
@@ -63,8 +78,8 @@ with st.sidebar:
     u = st.text_input("用户名")
 
     if st.button("登录"):
-        if u in ADMIN_USERS or u in USER_MAP:
-            st.session_state.user = u
+        if u.lower() in ADMIN_USERS or u.lower() in USER_MAP:
+            st.session_state.user = u.lower()
             st.rerun()
         else:
             st.error("用户不存在")
@@ -88,7 +103,17 @@ if is_admin:
     file = st.file_uploader("上传Excel", type=["xlsx"])
 
     if file:
-        df = pd.read_excel(file)
+        df = pd.read_excel(file, dtype=str)
+
+        # 清洗
+        df = df.dropna(how="all")
+        df.columns = df.columns.astype(str).str.strip()
+
+        if "供应商简称" in df.columns:
+            df["供应商简称"] = df["供应商简称"].astype(str).str.strip()
+
+        # 加ID
+        df.insert(0, "ID", range(len(df)))
 
         tid = str(int(time.time()))
         save_excel(df, tid)
@@ -111,76 +136,86 @@ tid = mp[table_name]
 
 df = load_excel(tid)
 
+if df is None:
+    st.error("读取失败")
+    st.stop()
+
 # ===== 商家端过滤 =====
 if not is_admin:
-    supplier = USER_MAP[user]
-    df = df[df["供应商简称"] == supplier]
+    supplier = USER_MAP[user].strip()
 
-# ===== 限制只能填空白 =====
-editable_df = df.copy()
+    st.write("你的供应商：", supplier)  # 可删
 
-for col in df.columns:
-    editable_df[col] = df[col]
+    if "供应商简称" not in df.columns:
+        st.error("❌ 表格缺少【供应商简称】列")
+        st.stop()
 
-edited = st.data_editor(editable_df, use_container_width=True)
+    filtered_df = df[df["供应商简称"] == supplier]
 
-# ===== 保存逻辑（限制修改）=====
+    if filtered_df.empty:
+        st.error("❌ 没有找到你的数据，请检查名称是否一致")
+        st.write("表格中的供应商：", df["供应商简称"].unique())
+        st.stop()
+
+    df = filtered_df
+
+# ===== 编辑 =====
+edited = st.data_editor(df, use_container_width=True)
+
+# ===== 保存 =====
 if st.button("💾 保存"):
-    original = load_excel(tid)
+    original = load_excel(tid).set_index("ID")
+    edited = edited.set_index("ID")
 
     if not is_admin:
         supplier = USER_MAP[user]
 
-        for i in range(len(original)):
-            if original.loc[i, "供应商简称"] == supplier:
+        # 只更新自己行
+        for idx in edited.index:
+            if edited.loc[idx, "供应商简称"] == supplier:
                 for col in original.columns:
-                    if pd.notna(original.loc[i, col]):
-                        edited.loc[i, col] = original.loc[i, col]
+                    if pd.notna(original.loc[idx, col]):
+                        edited.loc[idx, col] = original.loc[idx, col]
 
-    save_excel(edited, tid)
+    original.update(edited)
+    save_excel(original.reset_index(), tid)
+
     st.success("保存成功")
 
 # ===== 管理端监控 =====
-missing = check_missing(load_excel(tid))
-
 if is_admin:
     st.divider()
     st.subheader("📊 未填写监控")
+
+    missing = check_missing(load_excel(tid))
 
     if missing:
         st.error("未填写：" + ", ".join(missing))
     else:
         st.success("全部已完成")
 
-# ===== 管理端提醒 =====
+# ===== 提醒 =====
 if is_admin and missing:
     msg = st.text_area("提醒内容", "请尽快填写表格")
 
     if st.button("🚨 发送提醒"):
         remind = load_json(REMIND_FILE, {})
 
-        for u in missing:
-            remind[u] = msg
+        for supplier in missing:
+            users = SUPPLIER_CONFIG.get(supplier, [])
+            for u in users:
+                remind[u.lower()] = msg
 
         save_json(remind, REMIND_FILE)
         st.success("已发送")
 
-# ===== 商家弹窗 =====
+# ===== 商家提醒 =====
 if not is_admin:
-    placeholder = st.empty()
+    remind = load_json(REMIND_FILE, {})
 
-    for _ in range(30):
-        remind = load_json(REMIND_FILE, {})
+    if user in remind:
+        st.warning(f"📢 管理员提醒：{remind[user]}")
+        st.toast("你被提醒了")
 
-        if user in remind:
-            placeholder.warning(f"📢 管理员提醒：{remind[user]}")
-            st.toast("你被提醒了")
-
-            remind.pop(user)
-            save_json(remind, REMIND_FILE)
-
-            time.sleep(5)
-            placeholder.empty()
-            break
-
-        time.sleep(3)
+        remind.pop(user)
+        save_json(remind, REMIND_FILE)

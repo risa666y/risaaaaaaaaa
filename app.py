@@ -72,6 +72,8 @@ is_admin = user in ADMIN_USERS
 # ===== 管理端侧边栏 =====
 with st.sidebar:
     if is_admin:
+
+        # 上传
         st.divider()
         st.subheader("📤 上传表格")
 
@@ -95,13 +97,17 @@ with st.sidebar:
                 tid = str(int(time.time()))
                 save_excel(df, tid)
 
-                idx[tid] = {"filename": file.name, "visible": True}
+                idx[tid] = {
+                    "filename": file.name,
+                    "visible": True,
+                    "select_cols": {}
+                }
                 save_json(idx, INDEX_FILE)
 
                 st.success("上传成功")
                 st.rerun()
 
-        # ===== 表格管理 =====
+        # 表格管理
         st.divider()
         st.subheader("📂 表格管理")
 
@@ -135,19 +141,46 @@ with st.sidebar:
         if updated:
             save_json(idx, INDEX_FILE)
 
+        # ===== 下拉配置 =====
+        st.divider()
+        st.subheader("⚙️ 下拉配置")
+
+        table_names = [info["filename"] for info in idx.values()]
+
+        if table_names:
+            selected_table = st.selectbox("选择表", table_names)
+
+            tid_map = {info["filename"]: tid for tid, info in idx.items()}
+            tid_cfg = tid_map[selected_table]
+
+            df_cfg = load_excel(tid_cfg)
+
+            if df_cfg is not None:
+                col = st.selectbox("选择列", df_cfg.columns)
+
+                options = st.text_area("选项（逗号分隔）")
+
+                if st.button("保存配置"):
+                    idx.setdefault(tid_cfg, {})
+                    idx[tid_cfg].setdefault("select_cols", {})
+                    idx[tid_cfg]["select_cols"][col] = [
+                        x.strip() for x in options.split(",") if x.strip()
+                    ]
+                    save_json(idx, INDEX_FILE)
+                    st.success("已保存")
+
 # ===== 主界面 =====
 st.title("📊 供应商填表系统")
 
-# ===== 管理员自动刷新（已修复不卡登录）=====
+# 管理员自动刷新
 if is_admin:
     now = time.time()
     last = st.session_state.get("last_refresh", 0)
-
     if now - last > 2:
         st.session_state.last_refresh = now
         st.rerun()
 
-# ===== 表格选择 =====
+# 表格选择
 idx = load_json(INDEX_FILE, {})
 options, mp = [], {}
 
@@ -165,7 +198,7 @@ tid = mp[table_name]
 
 df = load_excel(tid)
 
-# ===== 商家过滤 =====
+# 商家过滤
 if not is_admin:
     supplier = USER_MAP[user]
 
@@ -178,6 +211,16 @@ if not is_admin:
     if df.empty:
         st.error("没有你的数据")
         st.stop()
+
+# ===== 下拉应用 =====
+select_cols = idx[tid].get("select_cols", {})
+column_config = {}
+
+for col, opts in select_cols.items():
+    column_config[col] = st.column_config.SelectboxColumn(
+        col,
+        options=opts
+    )
 
 # ===== 自动保存 =====
 def auto_save():
@@ -199,10 +242,11 @@ def auto_save():
 
     df_latest.reset_index().to_excel(path, index=False)
 
-# ===== 表格编辑 =====
+# 表格
 edited = st.data_editor(
     df,
     key="edited_df",
+    column_config=column_config,
     use_container_width=True,
     on_change=auto_save
 )

@@ -2,7 +2,7 @@ import streamlit as st
 import pandas as pd
 import os, json, time
 
-st.set_page_config(page_title="智能催填系统", layout="wide")
+st.set_page_config(page_title="供应商填表系统", layout="wide")
 
 # ===== 路径 =====
 SAVE_DIR = "saved_tables"
@@ -15,7 +15,7 @@ REMIND_FILE = f"{SAVE_DIR}/remind.json"
 SUPPLIER_CONFIG = {
     "恒尚": ["A小康先森"],
     "福蕾雅": ["严金虹"],
-    "杰祥": ["金刚小婷", "杰祥服饰", "x"],
+    "杰祥": ["金刚小婷", "杰祥服饰"],
 }
 ADMIN_USERS = {"admin"}
 USER_MAP = {u: k for k, v in SUPPLIER_CONFIG.items() for u in v}
@@ -29,6 +29,9 @@ def load_json(path, default={}):
 def save_json(data, path):
     json.dump(data, open(path, "w", encoding="utf-8"), ensure_ascii=False)
 
+def save_excel(df, tid):
+    df.to_excel(f"{SAVE_DIR}/{tid}.xlsx", index=False)
+
 def load_excel(tid):
     path = f"{SAVE_DIR}/{tid}.xlsx"
     if os.path.exists(path):
@@ -39,16 +42,16 @@ def get_tables():
     idx = load_json(INDEX_FILE, {})
     opts, mp = [], {}
     for tid, info in idx.items():
-        label = f"{info['filename']}"
+        label = info["filename"]
         opts.append(label)
         mp[label] = tid
     return opts, mp
 
-def check_fill_status(df):
+def check_missing(df):
     df = df.replace("", pd.NA)
-    missing = []
-    if "供应商简称" in df.columns:
-        missing = df[df.isna().any(axis=1)]["供应商简称"].dropna().tolist()
+    if "供应商简称" not in df.columns:
+        return []
+    missing = df[df.isna().any(axis=1)]["供应商简称"].dropna().tolist()
     return list(set(missing))
 
 # ===== 登录 =====
@@ -76,103 +79,108 @@ if not user:
 
 is_admin = user in ADMIN_USERS
 
-# ===== 页面 =====
-st.title("📊 智能催填系统")
+st.title("📊 供应商填表系统")
 
+# ===== 管理端上传 =====
+if is_admin:
+    st.subheader("📤 上传表格")
+
+    file = st.file_uploader("上传Excel", type=["xlsx"])
+
+    if file:
+        df = pd.read_excel(file)
+
+        tid = str(int(time.time()))
+        save_excel(df, tid)
+
+        idx = load_json(INDEX_FILE, {})
+        idx[tid] = {"filename": file.name}
+        save_json(idx, INDEX_FILE)
+
+        st.success("上传成功")
+
+# ===== 表格选择 =====
 options, mp = get_tables()
-all_missing = {}
 
-# ===== 数据检测 =====
-for name in options:
-    df = load_excel(mp[name])
-    if df is None:
-        continue
+if not options:
+    st.warning("⚠️ 还没有表格，请管理员上传")
+    st.stop()
 
-    missing = check_fill_status(df)
+table_name = st.selectbox("选择表格", options)
+tid = mp[table_name]
 
-    if is_admin:
-        if missing:
-            all_missing[name] = missing
-            st.error(f"{name} 未填写：{', '.join(missing)}")
-    else:
+df = load_excel(tid)
+
+# ===== 商家端过滤 =====
+if not is_admin:
+    supplier = USER_MAP[user]
+    df = df[df["供应商简称"] == supplier]
+
+# ===== 限制只能填空白 =====
+editable_df = df.copy()
+
+for col in df.columns:
+    editable_df[col] = df[col]
+
+edited = st.data_editor(editable_df, use_container_width=True)
+
+# ===== 保存逻辑（限制修改）=====
+if st.button("💾 保存"):
+    original = load_excel(tid)
+
+    if not is_admin:
         supplier = USER_MAP[user]
 
-        if supplier in missing:
-            st.error(f"{name} ❌ 你未填写")
-            all_missing[name] = [supplier]
-        else:
-            st.success(f"{name} ✅ 已完成")
+        for i in range(len(original)):
+            if original.loc[i, "供应商简称"] == supplier:
+                for col in original.columns:
+                    if pd.notna(original.loc[i, col]):
+                        edited.loc[i, col] = original.loc[i, col]
 
-# ===== 管理员提醒 =====
-if is_admin and all_missing:
+    save_excel(edited, tid)
+    st.success("保存成功")
 
+# ===== 管理端监控 =====
+missing = check_missing(load_excel(tid))
+
+if is_admin:
     st.divider()
-    st.subheader("📢 发布公告提醒")
+    st.subheader("📊 未填写监控")
 
-    custom_msg = st.text_area(
-        "提醒内容",
-        value="请尽快填写未完成的表格！",
-        height=100
-    )
+    if missing:
+        st.error("未填写：" + ", ".join(missing))
+    else:
+        st.success("全部已完成")
+
+# ===== 管理端提醒 =====
+if is_admin and missing:
+    msg = st.text_area("提醒内容", "请尽快填写表格")
 
     if st.button("🚨 发送提醒"):
-
         remind = load_json(REMIND_FILE, {})
 
-        for users in all_missing.values():
-            for u in users:
-                remind[u] = {
-                    "msg": custom_msg,
-                    "time": str(pd.Timestamp.now())
-                }
+        for u in missing:
+            remind[u] = msg
 
         save_json(remind, REMIND_FILE)
+        st.success("已发送")
 
-        st.success("✅ 提醒已发送（商家会弹窗）")
-
-# ===== 🚀 商家端实时公告弹窗 =====
+# ===== 商家弹窗 =====
 if not is_admin:
-
     placeholder = st.empty()
 
-    for i in range(60):  # 最多轮询5分钟
+    for _ in range(30):
         remind = load_json(REMIND_FILE, {})
 
         if user in remind:
+            placeholder.warning(f"📢 管理员提醒：{remind[user]}")
+            st.toast("你被提醒了")
 
-            data = remind[user]
-            msg = data.get("msg", "")
-
-            # 🔥 顶部公告栏
-            placeholder.markdown(f"""
-            <div style="
-                position: fixed;
-                top: 0;
-                left: 0;
-                width: 100%;
-                background-color: #ff4b4b;
-                color: white;
-                padding: 15px;
-                text-align: center;
-                font-size: 18px;
-                font-weight: bold;
-                z-index: 9999;
-                box-shadow: 0 2px 10px rgba(0,0,0,0.2);
-            ">
-            📢 管理员通知：{msg}
-            </div>
-            """, unsafe_allow_html=True)
-
-            st.toast("📢 收到管理员提醒")
-
-            # 清掉（避免重复弹）
             remind.pop(user)
             save_json(remind, REMIND_FILE)
 
-            # 自动消失（5秒）
             time.sleep(5)
             placeholder.empty()
-
             break
 
-        time.sleep(5)
+        time.sleep(3)

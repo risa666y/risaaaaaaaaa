@@ -54,6 +54,7 @@ with st.sidebar:
     if st.button("登录"):
         if u.lower() in ADMIN_USERS or u.lower() in USER_MAP:
             st.session_state.user = u.lower()
+            st.session_state.last_refresh = time.time()
             st.rerun()
         else:
             st.error("用户不存在")
@@ -94,10 +95,7 @@ with st.sidebar:
                 tid = str(int(time.time()))
                 save_excel(df, tid)
 
-                idx[tid] = {
-                    "filename": file.name,
-                    "visible": True
-                }
+                idx[tid] = {"filename": file.name, "visible": True}
                 save_json(idx, INDEX_FILE)
 
                 st.success("上传成功")
@@ -140,16 +138,18 @@ with st.sidebar:
 # ===== 主界面 =====
 st.title("📊 供应商填表系统")
 
-# ===== 管理员自动刷新（核心）=====
+# ===== 管理员自动刷新（已修复不卡登录）=====
 if is_admin:
-    time.sleep(2)
-    st.rerun()
+    now = time.time()
+    last = st.session_state.get("last_refresh", 0)
+
+    if now - last > 2:
+        st.session_state.last_refresh = now
+        st.rerun()
 
 # ===== 表格选择 =====
 idx = load_json(INDEX_FILE, {})
-
-options = []
-mp = {}
+options, mp = [], {}
 
 for tid, info in idx.items():
     if info.get("visible", True):
@@ -179,19 +179,16 @@ if not is_admin:
         st.error("没有你的数据")
         st.stop()
 
-# ===== 自动保存函数 =====
+# ===== 自动保存 =====
 def auto_save():
     path = f"{SAVE_DIR}/{tid}.xlsx"
 
     df_new = st.session_state["edited_df"]
-
-    # 👉 重新读取最新数据（防止覆盖别人）
     df_latest = pd.read_excel(path, dtype=str)
 
     df_latest.set_index("ID", inplace=True)
     df_new = df_new.set_index("ID")
 
-    # 👉 只更新当前用户的行
     if not is_admin:
         supplier = USER_MAP[user]
         df_new = df_new[df_new["供应商简称"] == supplier]
@@ -202,7 +199,7 @@ def auto_save():
 
     df_latest.reset_index().to_excel(path, index=False)
 
-# ===== 表格编辑（自动保存）=====
+# ===== 表格编辑 =====
 edited = st.data_editor(
     df,
     key="edited_df",

@@ -9,7 +9,6 @@ SAVE_DIR = "saved_tables"
 os.makedirs(SAVE_DIR, exist_ok=True)
 
 INDEX_FILE = f"{SAVE_DIR}/index.json"
-REMIND_FILE = f"{SAVE_DIR}/remind.json"
 
 # ===== 用户 =====
 SUPPLIER_CONFIG = {
@@ -19,7 +18,6 @@ SUPPLIER_CONFIG = {
 }
 ADMIN_USERS = {"admin"}
 
-# 小写统一（防止输错）
 USER_MAP = {u.lower(): k for k, v in SUPPLIER_CONFIG.items() for u in v}
 
 # ===== 工具 =====
@@ -38,43 +36,21 @@ def load_excel(tid):
     path = f"{SAVE_DIR}/{tid}.xlsx"
     if os.path.exists(path):
         df = pd.read_excel(path, dtype=str)
-
-        # ✅ 清洗
         df = df.dropna(how="all")
         df.columns = df.columns.astype(str).str.strip()
 
         if "供应商简称" in df.columns:
             df["供应商简称"] = df["供应商简称"].astype(str).str.strip()
 
-        # ✅ 加ID防错位
         if "ID" not in df.columns:
             df.insert(0, "ID", range(len(df)))
 
         return df
     return None
 
-def get_tables():
-    idx = load_json(INDEX_FILE, {})
-    opts, mp = [], {}
-    for tid, info in idx.items():
-        label = info["filename"]
-        opts.append(label)
-        mp[label] = tid
-    return opts, mp
-
-def check_missing(df):
-    df = df.replace("", pd.NA)
-    if "供应商简称" not in df.columns:
-        return []
-    missing = df[df.isna().any(axis=1)]["供应商简称"].dropna().tolist()
-    return list(set(missing))
-
-# ===== 登录 =====
-if "user" not in st.session_state:
-    st.session_state.user = None
-
+# ===== 登录（侧边栏）=====
 with st.sidebar:
-    st.title("登录")
+    st.title("🔐 登录")
     u = st.text_input("用户名")
 
     if st.button("登录"):
@@ -88,47 +64,113 @@ with st.sidebar:
         st.session_state.user = None
         st.rerun()
 
-user = st.session_state.user
+user = st.session_state.get("user")
 if not user:
     st.stop()
 
 is_admin = user in ADMIN_USERS
 
-st.title("📊 供应商填表系统")
+# ===== 管理端侧边栏 =====
+with st.sidebar:
+    if is_admin:
+        st.divider()
+        st.subheader("📤 上传表格")
 
-# ===== 管理端上传 =====
-if is_admin:
-    st.subheader("📤 上传表格")
+        file = st.file_uploader("上传Excel", type=["xlsx"])
 
-    file = st.file_uploader("上传Excel", type=["xlsx"])
+        if file:
+            df = pd.read_excel(file, dtype=str)
+            df = df.dropna(how="all")
+            df.columns = df.columns.str.strip()
 
-    if file:
-        df = pd.read_excel(file, dtype=str)
+            if "供应商简称" in df.columns:
+                df["供应商简称"] = df["供应商简称"].astype(str).str.strip()
 
-        # 清洗
-        df = df.dropna(how="all")
-        df.columns = df.columns.astype(str).str.strip()
+            df.insert(0, "ID", range(len(df)))
 
-        if "供应商简称" in df.columns:
-            df["供应商简称"] = df["供应商简称"].astype(str).str.strip()
+            tid = str(int(time.time()))
+            save_excel(df, tid)
 
-        # 加ID
-        df.insert(0, "ID", range(len(df)))
+            idx = load_json(INDEX_FILE, {})
+            idx[tid] = {
+                "filename": file.name,
+                "visible": True,
+                "select_cols": {}
+            }
+            save_json(idx, INDEX_FILE)
 
-        tid = str(int(time.time()))
-        save_excel(df, tid)
+            st.success("上传成功")
+
+        st.divider()
+        st.subheader("📂 表格管理")
 
         idx = load_json(INDEX_FILE, {})
-        idx[tid] = {"filename": file.name}
+
+        for tid, info in list(idx.items()):
+            col1, col2, col3 = st.columns([2,1,1])
+
+            with col1:
+                st.write(info["filename"])
+
+            with col2:
+                visible = st.checkbox(
+                    "显示",
+                    value=info.get("visible", True),
+                    key=f"vis_{tid}"
+                )
+                idx[tid]["visible"] = visible
+
+            with col3:
+                if st.button("删除", key=f"del_{tid}"):
+                    os.remove(f"{SAVE_DIR}/{tid}.xlsx")
+                    idx.pop(tid)
+                    save_json(idx, INDEX_FILE)
+                    st.rerun()
+
         save_json(idx, INDEX_FILE)
 
-        st.success("上传成功")
+        # ===== 下拉配置 =====
+        st.divider()
+        st.subheader("⚙️ 下拉配置")
 
-# ===== 表格选择 =====
-options, mp = get_tables()
+        table_names = [info["filename"] for info in idx.values()]
+        if table_names:
+            selected_table = st.selectbox("选择表", table_names)
+
+            tid_map = {info["filename"]: tid for tid, info in idx.items()}
+            tid_cfg = tid_map[selected_table]
+
+            df_cfg = load_excel(tid_cfg)
+
+            col = st.selectbox("选择列", df_cfg.columns)
+            options = st.text_area("选项（逗号分隔）")
+
+            if st.button("保存配置"):
+                idx[tid_cfg].setdefault("select_cols", {})
+                idx[tid_cfg]["select_cols"][col] = options.split(",")
+                save_json(idx, INDEX_FILE)
+                st.success("已保存")
+
+# ===== 主界面 =====
+st.title("📊 供应商填表系统")
+
+# 自动刷新（管理员）
+if is_admin:
+    st.autorefresh(interval=5000, key="refresh")
+
+# 读取表
+idx = load_json(INDEX_FILE, {})
+
+options = []
+mp = {}
+
+for tid, info in idx.items():
+    if info.get("visible", True):
+        options.append(info["filename"])
+        mp[info["filename"]] = tid
 
 if not options:
-    st.warning("⚠️ 还没有表格，请管理员上传")
+    st.warning("暂无表格")
     st.stop()
 
 table_name = st.selectbox("选择表格", options)
@@ -136,86 +178,60 @@ tid = mp[table_name]
 
 df = load_excel(tid)
 
-if df is None:
-    st.error("读取失败")
-    st.stop()
-
-# ===== 商家端过滤 =====
+# ===== 商家过滤 =====
 if not is_admin:
-    supplier = USER_MAP[user].strip()
-
-    st.write("你的供应商：", supplier)  # 可删
+    supplier = USER_MAP[user]
 
     if "供应商简称" not in df.columns:
-        st.error("❌ 表格缺少【供应商简称】列")
+        st.error("缺少供应商列")
         st.stop()
 
-    filtered_df = df[df["供应商简称"] == supplier]
+    df = df[df["供应商简称"] == supplier]
 
-    if filtered_df.empty:
-        st.error("❌ 没有找到你的数据，请检查名称是否一致")
-        st.write("表格中的供应商：", df["供应商简称"].unique())
+    if df.empty:
+        st.error("没有你的数据")
         st.stop()
 
-    df = filtered_df
+# ===== 下拉列 =====
+select_cols = idx[tid].get("select_cols", {})
 
-# ===== 编辑 =====
-edited = st.data_editor(df, use_container_width=True)
+column_config = {}
+for col, opts in select_cols.items():
+    column_config[col] = st.column_config.SelectboxColumn(
+        col,
+        options=opts
+    )
 
-# ===== 保存 =====
+edited = st.data_editor(df, column_config=column_config, use_container_width=True)
+
+# ===== 保存（核心锁死逻辑）=====
 if st.button("💾 保存"):
+
     original = load_excel(tid).set_index("ID")
     edited = edited.set_index("ID")
 
     if not is_admin:
         supplier = USER_MAP[user]
 
-        # 只更新自己行
-        for idx in edited.index:
-            if edited.loc[idx, "供应商简称"] == supplier:
-                for col in original.columns:
-                    if pd.notna(original.loc[idx, col]):
-                        edited.loc[idx, col] = original.loc[idx, col]
+        for i in edited.index:
+
+            # 不是自己行 → 禁止
+            if edited.loc[i, "供应商简称"] != supplier:
+                edited.loc[i] = original.loc[i]
+                continue
+
+            for col in original.columns:
+
+                old = original.loc[i, col]
+                new = edited.loc[i, col]
+
+                # 🔒 已有值锁死
+                if pd.notna(old) and old != "":
+                    edited.loc[i, col] = old
+                else:
+                    edited.loc[i, col] = new
 
     original.update(edited)
     save_excel(original.reset_index(), tid)
 
     st.success("保存成功")
-
-# ===== 管理端监控 =====
-if is_admin:
-    st.divider()
-    st.subheader("📊 未填写监控")
-
-    missing = check_missing(load_excel(tid))
-
-    if missing:
-        st.error("未填写：" + ", ".join(missing))
-    else:
-        st.success("全部已完成")
-
-# ===== 提醒 =====
-if is_admin and missing:
-    msg = st.text_area("提醒内容", "请尽快填写表格")
-
-    if st.button("🚨 发送提醒"):
-        remind = load_json(REMIND_FILE, {})
-
-        for supplier in missing:
-            users = SUPPLIER_CONFIG.get(supplier, [])
-            for u in users:
-                remind[u.lower()] = msg
-
-        save_json(remind, REMIND_FILE)
-        st.success("已发送")
-
-# ===== 商家提醒 =====
-if not is_admin:
-    remind = load_json(REMIND_FILE, {})
-
-    if user in remind:
-        st.warning(f"📢 管理员提醒：{remind[user]}")
-        st.toast("你被提醒了")
-
-        remind.pop(user)
-        save_json(remind, REMIND_FILE)

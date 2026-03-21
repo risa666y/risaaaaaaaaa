@@ -291,28 +291,31 @@ for i, sel in enumerate(sels):
 
         st.markdown("### 📊 填写进度")
 
-        col1, col2 = st.columns(2)
+        if is_admin:
+            col1, col2 = st.columns(2)
 
-        with col1:
-            st.success(f"✅ 已填写（{len(done_suppliers)}）")
-            st.write("、".join(done_suppliers) if done_suppliers else "暂无")
+            with col1:
+                st.success(f"✅ 已填写（{len(done_suppliers)}）")
+                st.write("、".join(done_suppliers) if done_suppliers else "暂无")
 
-        with col2:
-            st.warning(f"❌ 未填写（{len(todo_suppliers)}）")
-            st.write("、".join(todo_suppliers) if todo_suppliers else "全部完成 🎉")
+            with col2:
+                st.warning(f"❌ 未填写（{len(todo_suppliers)}）")
+                st.write("、".join(todo_suppliers) if todo_suppliers else "全部完成 🎉")
 
-        # 表格
+        else:
+            supplier = USER_MAP[user].strip()
+
+            if supplier in done_suppliers:
+                st.success("✅ 你已完成填写")
+            else:
+                st.warning("❌ 你还未填写")
+
+        # ================= 表格 =================
         if not is_admin:
             supplier = USER_MAP[user].strip()
             df_edit = df[
                 df["供应商简称"].astype(str).str.contains(supplier, case=False, na=False)
             ].copy()
-
-            if supplier in done_suppliers:
-                st.success("你已完成填写 ✅")
-            else:
-                st.warning("你还未填写 ❗")
-
         else:
             df_edit = df.copy()
 

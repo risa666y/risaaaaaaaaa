@@ -128,19 +128,26 @@ def get_tables():
 if "user" not in st.session_state:
     st.session_state.user = None
 
-# ⭐ 自动恢复登录
-saved_local_user = streamlit_js_eval(
-    js_expressions="localStorage.getItem('current_user')",
-    key="get_current_user"
-)
+# ⭐ 稳定自动登录（关键修复）
+if "local_user_loaded" not in st.session_state:
+    st.session_state.local_user_loaded = False
 
-if saved_local_user and not st.session_state.user:
-    try:
-        saved_local_user = saved_local_user.strip('"')
-        if saved_local_user in ADMIN_USERS or saved_local_user in USER_MAP:
-            st.session_state.user = saved_local_user
-    except:
-        pass
+if not st.session_state.local_user_loaded:
+    result = streamlit_js_eval(
+        js_expressions="localStorage.getItem('current_user')",
+        key="get_current_user"
+    )
+
+    if result is not None:
+        try:
+            user_from_local = result.strip('"')
+            if user_from_local in ADMIN_USERS or user_from_local in USER_MAP:
+                st.session_state.user = user_from_local
+        except:
+            pass
+
+        st.session_state.local_user_loaded = True
+        st.rerun()
 
 query_params = st.query_params
 saved_user = query_params.get("user", [None])[0]
@@ -184,7 +191,6 @@ with st.sidebar:
                     st.session_state.user = user_input
                     st.query_params["user"] = user_input
 
-                    # ⭐ 写入浏览器（记住登录）
                     streamlit_js_eval(
                         js_expressions=f"localStorage.setItem('current_user', '{user_input}')",
                         key="set_current_user"

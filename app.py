@@ -96,7 +96,7 @@ def get_tables():
         mp[label] = tid
     return sorted(opts, reverse=True), mp
 
-# ================= 登录（增强版） =================
+# ================= 登录 =================
 if "user" not in st.session_state:
     st.session_state.user = None
 
@@ -152,17 +152,11 @@ with st.sidebar:
                 else:
                     st.error("用户不存在")
 
-    # ✅ 刷新控制（新增）
     st.subheader("🔄 页面控制")
-
     if st.button("刷新页面"):
         st.rerun()
-
     if st.button("强制刷新"):
-        streamlit_js_eval(
-            js_expressions="location.reload()",
-            key="force_refresh"
-        )
+        streamlit_js_eval(js_expressions="location.reload()", key="force_refresh")
 
 user = st.session_state.user
 if not user:
@@ -339,6 +333,43 @@ for i, sel in enumerate(sels):
         else:
             df_edit = df.copy()
 
+        # ================= 🔍 筛选功能 =================
+        st.markdown("### 🔍 数据筛选")
+
+        col1, col2 = st.columns(2)
+
+        with col1:
+            keyword = st.text_input("关键词搜索（全字段）", key=f"search_{tid}_{user}")
+
+        with col2:
+            filter_col = st.selectbox(
+                "选择筛选列",
+                [""] + df_edit.columns.tolist(),
+                key=f"filtercol_{tid}_{user}"
+            )
+
+        filter_val = ""
+        if filter_col:
+            filter_val = st.text_input(
+                f"{filter_col}筛选值",
+                key=f"filterval_{tid}_{user}"
+            )
+
+        df_filtered = df_edit.copy()
+
+        if keyword:
+            df_filtered = df_filtered[
+                df_filtered.apply(lambda row: row.astype(str).str.contains(keyword, case=False).any(), axis=1)
+            ]
+
+        if filter_col and filter_val:
+            df_filtered = df_filtered[
+                df_filtered[filter_col].astype(str).str.contains(filter_val, case=False, na=False)
+            ]
+
+        df_edit = df_filtered
+
+        # ================= 编辑 =================
         select_all = load_json(SELECT_FILE, {})
         select_cfg = select_all.get(tid, {})
 

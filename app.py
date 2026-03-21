@@ -188,7 +188,7 @@ if is_admin:
                 st.sidebar.error(f"{f.name}缺少【供应商简称】列")
                 continue
 
-            # ✅ 初始化 ID
+            # ✅ 初始化唯一ID
             df.insert(0, "ID", [uuid.uuid4().hex[:8] for _ in range(len(df))])
 
             tid = gen_id()
@@ -225,6 +225,57 @@ if is_admin:
         st.sidebar.success("已自动保存")
         st.rerun()
 
+# ================= 删除 =================
+if is_admin:
+    st.sidebar.subheader("🗑 删除表格")
+    del_label = st.sidebar.selectbox("选择删除", [""] + options)
+
+    if st.sidebar.button("删除"):
+        if del_label:
+            tid_del = mp[del_label]
+
+            if os.path.exists(f"{SAVE_DIR}/{tid_del}.xlsx"):
+                os.remove(f"{SAVE_DIR}/{tid_del}.xlsx")
+
+            idx = load_json(INDEX_FILE, {})
+            idx.pop(tid_del, None)
+            save_json(idx, INDEX_FILE)
+
+            st.sidebar.success("已删除")
+            st.rerun()
+
+# ================= 下拉配置 =================
+if is_admin:
+    st.sidebar.subheader("⚙️ 下拉配置")
+
+    config_target = st.sidebar.selectbox("选择配置表", options)
+
+    if config_target:
+        tid_cfg = mp[config_target]
+        df_cfg = load_excel(tid_cfg)
+
+        select_all = load_json(SELECT_FILE, {})
+        old_cfg = select_all.get(tid_cfg, {})
+
+        cols = st.sidebar.multiselect(
+            "选择列",
+            df_cfg.columns.tolist(),
+            default=list(old_cfg.keys())
+        )
+
+        new_cfg = {}
+
+        for col in cols:
+            default_val = ",".join(old_cfg.get(col, []))
+            txt = st.sidebar.text_area(f"{col}选项", value=default_val)
+            new_cfg[col] = [i.strip() for i in txt.split(",") if i.strip()]
+
+        if st.sidebar.button("保存下拉配置"):
+            select_all[tid_cfg] = new_cfg
+            save_json(select_all, SELECT_FILE)
+            st.sidebar.success("已保存")
+            st.rerun()
+
 # ================= 展示 =================
 sels = [o for o in options if mp[o] in show_cfg]
 
@@ -242,16 +293,28 @@ for i, sel in enumerate(sels):
 
         if not is_admin:
             supplier = USER_MAP[user].strip()
-
-            # ✅ 精确匹配
             df_edit = df[df["供应商简称"].str.strip() == supplier].copy()
         else:
             df_edit = df.copy()
+
+        # ✅ 下拉配置生效
+        select_all = load_json(SELECT_FILE, {})
+        select_cfg = select_all.get(tid, {})
+
+        column_config = {}
+
+        if not is_admin and "供应商简称" in df_edit.columns:
+            column_config["供应商简称"] = st.column_config.TextColumn(disabled=True)
+
+        for col, opts in select_cfg.items():
+            if col in df_edit.columns:
+                column_config[col] = st.column_config.SelectboxColumn(options=opts)
 
         edited = st.data_editor(
             df_edit,
             use_container_width=True,
             height=500,
+            column_config=column_config,
             key=f"editor_{tid}_{user}"
         )
 
@@ -272,7 +335,7 @@ for i, sel in enumerate(sels):
                         (full_df["供应商简称"].str.strip() == supplier)
                     )
 
-                    # ✅ 修复核心：不再跳过空值
+                    # ✅ 关键修复：不跳过空值
                     for col in edited.columns:
                         full_df.loc[mask, col] = str(row[col]).strip()
 
@@ -298,3 +361,10 @@ for i, sel in enumerate(sels):
 
             st.success(f"已完成 {len(done)}：{sorted(done)}")
             st.error(f"未完成 {len(not_done)}：{sorted(not_done)}")
+
+# ================= 自动刷新 =================
+if is_admin:
+    auto = st.sidebar.checkbox("开启实时同步", value=True)
+    if auto:
+        time.sleep(5)
+        st.rerun()

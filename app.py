@@ -128,6 +128,20 @@ def get_tables():
 if "user" not in st.session_state:
     st.session_state.user = None
 
+# ⭐ 自动恢复登录
+saved_local_user = streamlit_js_eval(
+    js_expressions="localStorage.getItem('current_user')",
+    key="get_current_user"
+)
+
+if saved_local_user and not st.session_state.user:
+    try:
+        saved_local_user = saved_local_user.strip('"')
+        if saved_local_user in ADMIN_USERS or saved_local_user in USER_MAP:
+            st.session_state.user = saved_local_user
+    except:
+        pass
+
 query_params = st.query_params
 saved_user = query_params.get("user", [None])[0]
 
@@ -148,10 +162,18 @@ with st.sidebar:
 
     if st.session_state.user:
         st.success(f"当前用户：{st.session_state.user}")
+
         if st.button("退出"):
             st.session_state.user = None
+
+            streamlit_js_eval(
+                js_expressions="localStorage.removeItem('current_user')",
+                key="clear_user"
+            )
+
             st.query_params.clear()
             st.rerun()
+
     else:
         with st.form("login_form"):
             user_input = st.text_input("登录账号", value=last_user)
@@ -162,6 +184,12 @@ with st.sidebar:
                     st.session_state.user = user_input
                     st.query_params["user"] = user_input
 
+                    # ⭐ 写入浏览器（记住登录）
+                    streamlit_js_eval(
+                        js_expressions=f"localStorage.setItem('current_user', '{user_input}')",
+                        key="set_current_user"
+                    )
+
                     if user_input not in history:
                         history.append(user_input)
 
@@ -169,6 +197,7 @@ with st.sidebar:
                         js_expressions=f"localStorage.setItem('history_users', '{json.dumps(history)}')",
                         key="set_history"
                     )
+
                     st.rerun()
                 else:
                     st.error("用户不存在")

@@ -67,7 +67,7 @@ if "user" not in st.session_state:
 with st.sidebar:
     st.title("🔐 登录")
 
-    st.components.v1.html("""
+    login_val = st.components.v1.html("""
     <style>
     .login-box { position: relative; }
     .dropdown {
@@ -84,13 +84,8 @@ with st.sidebar:
         display: none;
         z-index: 9999;
     }
-    .item {
-        padding: 8px;
-        cursor: pointer;
-    }
-    .item:hover {
-        background: #f5f5f5;
-    }
+    .item { padding: 8px; cursor: pointer; }
+    .item:hover { background: #f5f5f5; }
     </style>
 
     <div class="login-box">
@@ -98,7 +93,7 @@ with st.sidebar:
         <div id="dropdown" class="dropdown"></div>
     </div>
 
-    <button onclick="login()" style="width:100%;margin-top:8px;">登录</button>
+    <button onclick="sendValue()" style="width:100%;margin-top:8px;">登录</button>
 
     <script>
     const input = document.getElementById("user_input");
@@ -137,47 +132,45 @@ with st.sidebar:
         }
     });
 
-    function login(){
+    function sendValue(){
         const val = input.value || "";
-        const url = new URL(window.location);
-        url.searchParams.set("login_user", val);
-        window.location.href = url.toString();
+        const streamlitEvent = new CustomEvent("streamlit:setComponentValue", {
+            detail: val
+        });
+        window.dispatchEvent(streamlitEvent);
     }
 
     input.addEventListener("keydown", function(e){
         if(e.key === "Enter"){
-            login();
+            sendValue();
         }
     });
     </script>
     """, height=180)
 
-    params = st.experimental_get_query_params()
+    # ✅ 关键防炸
+    if login_val is not None and str(login_val).strip() != "":
+        username = str(login_val).strip()
 
-    if "login_user" in params:
-        username = params["login_user"][0].strip()
+        if username in ADMIN_USERS or username in USER_MAP:
 
-        if username:
-            if username in ADMIN_USERS or username in USER_MAP:
+            st.components.v1.html(f"""
+            <script>
+            let arr = localStorage.getItem("saved_usernames");
+            arr = arr ? JSON.parse(arr) : [];
 
-                st.components.v1.html(f"""
-                <script>
-                let arr = localStorage.getItem("saved_usernames");
-                arr = arr ? JSON.parse(arr) : [];
+            if(!arr.includes("{username}")) {{
+                arr.push("{username}");
+            }}
 
-                if(!arr.includes("{username}")) {{
-                    arr.push("{username}");
-                }}
+            localStorage.setItem("saved_usernames", JSON.stringify(arr));
+            </script>
+            """, height=0)
 
-                localStorage.setItem("saved_usernames", JSON.stringify(arr));
-                </script>
-                """, height=0)
-
-                st.session_state.user = username
-                st.experimental_set_query_params()
-                st.rerun()
-            else:
-                st.error("用户不存在")
+            st.session_state.user = username
+            st.rerun()
+        else:
+            st.error("用户不存在")
 
     if st.button("退出"):
         st.session_state.user = None
@@ -323,8 +316,6 @@ edited = st.data_editor(
 
 # ================= 保存 =================
 def auto_save():
-    global edited
-
     if edited is None or edited.empty:
         st.warning("没有可保存的数据")
         return

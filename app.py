@@ -81,7 +81,7 @@ def save_json(data, path):
         json.dump(data, f, ensure_ascii=False, indent=2)
     os.replace(tmp, path)
 
-def gen_id(name):
+def gen_id():
     return uuid.uuid4().hex[:12]
 
 def save_excel(df, tid):
@@ -97,8 +97,11 @@ def load_excel(tid):
         df = pd.read_excel(path, dtype=str).fillna("")
         df.columns = df.columns.str.strip()
         df = df.astype(str).apply(lambda col: col.str.strip())
+
+        # ✅ 修复：ID 永久唯一
         if "ID" not in df.columns:
-            df.insert(0, "ID", range(len(df)))
+            df.insert(0, "ID", [uuid.uuid4().hex[:8] for _ in range(len(df))])
+
         return df.reset_index(drop=True)
     return pd.DataFrame()
 
@@ -111,7 +114,7 @@ def get_tables():
         mp[label] = tid
     return sorted(opts, reverse=True), mp
 
-# ================= 登录（自动登录） =================
+# ================= 登录 =================
 if "user" not in st.session_state:
     st.session_state.user = None
 
@@ -185,7 +188,10 @@ if is_admin:
                 st.sidebar.error(f"{f.name}缺少【供应商简称】列")
                 continue
 
-            tid = gen_id(f.name)
+            # ✅ 初始化 ID
+            df.insert(0, "ID", [uuid.uuid4().hex[:8] for _ in range(len(df))])
+
+            tid = gen_id()
             save_excel(df, tid)
 
             idx = load_json(INDEX_FILE, {})
@@ -201,7 +207,7 @@ if is_admin:
 # ================= 表格列表 =================
 options, mp = get_tables()
 
-# ================= 展示控制（仅管理员） =================
+# ================= 展示控制 =================
 show_cfg = load_json(SHOW_FILE, [])
 
 if is_admin:
@@ -218,57 +224,6 @@ if is_admin:
         save_json(new_show, SHOW_FILE)
         st.sidebar.success("已自动保存")
         st.rerun()
-
-# ================= 删除 =================
-if is_admin:
-    st.sidebar.subheader("🗑 删除表格")
-    del_label = st.sidebar.selectbox("选择删除", [""] + options)
-
-    if st.sidebar.button("删除"):
-        if del_label:
-            tid_del = mp[del_label]
-
-            if os.path.exists(f"{SAVE_DIR}/{tid_del}.xlsx"):
-                os.remove(f"{SAVE_DIR}/{tid_del}.xlsx")
-
-            idx = load_json(INDEX_FILE, {})
-            idx.pop(tid_del, None)
-            save_json(idx, INDEX_FILE)
-
-            st.sidebar.success("已删除")
-            st.rerun()
-
-# ================= 下拉配置 =================
-if is_admin:
-    st.sidebar.subheader("⚙️ 下拉配置")
-
-    config_target = st.sidebar.selectbox("选择配置表", options)
-
-    if config_target:
-        tid_cfg = mp[config_target]
-        df_cfg = load_excel(tid_cfg)
-
-        select_all = load_json(SELECT_FILE, {})
-        old_cfg = select_all.get(tid_cfg, {})
-
-        cols = st.sidebar.multiselect(
-            "选择列",
-            df_cfg.columns.tolist(),
-            default=list(old_cfg.keys())
-        )
-
-        new_cfg = {}
-
-        for col in cols:
-            default_val = ",".join(old_cfg.get(col, []))
-            txt = st.sidebar.text_area(f"{col}选项", value=default_val)
-            new_cfg[col] = [i.strip() for i in txt.split(",") if i.strip()]
-
-        if st.sidebar.button("保存下拉配置"):
-            select_all[tid_cfg] = new_cfg
-            save_json(select_all, SELECT_FILE)
-            st.sidebar.success("已保存")
-            st.rerun()
 
 # ================= 展示 =================
 sels = [o for o in options if mp[o] in show_cfg]
@@ -288,42 +243,19 @@ for i, sel in enumerate(sels):
         if not is_admin:
             supplier = USER_MAP[user].strip()
 
-            # ✅ 只做“包含匹配”
-            df_edit = df[
-                df["供应商简称"].astype(str).str.contains(
-                    supplier,
-                    case=False,
-                    na=False
-                )
-            ].copy()
+            # ✅ 精确匹配
+            df_edit = df[df["供应商简称"].str.strip() == supplier].copy()
         else:
             df_edit = df.copy()
-
-        select_all = load_json(SELECT_FILE, {})
-        select_cfg = select_all.get(tid, {})
-
-        column_config = {}
-
-        if not is_admin and "供应商简称" in df_edit.columns:
-            column_config["供应商简称"] = st.column_config.TextColumn(disabled=True)
-
-        for col, opts in select_cfg.items():
-            if col in df_edit.columns:
-                column_config[col] = st.column_config.SelectboxColumn(options=opts)
 
         edited = st.data_editor(
             df_edit,
             use_container_width=True,
             height=500,
-            column_config=column_config,
             key=f"editor_{tid}_{user}"
         )
 
         if st.button(f"💾 保存：{sel}", key=f"save_{tid}"):
-
-            if edited is None or edited.empty:
-                st.warning("没有可保存数据")
-                continue
 
             full_df = load_excel(tid)
 
@@ -333,21 +265,16 @@ for i, sel in enumerate(sels):
                 supplier = USER_MAP[user].strip()
 
                 for _, row in edited.iterrows():
+                    rid = row["ID"]
+
+                    mask = (
+                        (full_df["ID"] == rid) &
+                        (full_df["供应商简称"].str.strip() == supplier)
+                    )
+
+                    # ✅ 修复核心：不再跳过空值
                     for col in edited.columns:
-                        val = str(row[col]).strip()
-                        if val == "":
-                            continue
-
-                        mask = (
-                            (full_df["ID"] == row["ID"]) &
-                            (full_df["供应商简称"].astype(str).str.contains(
-                                supplier,
-                                case=False,
-                                na=False
-                            ))
-                        )
-
-                        full_df.loc[mask, col] = val
+                        full_df.loc[mask, col] = str(row[col]).strip()
 
                 save_excel(full_df, tid)
 
@@ -371,10 +298,3 @@ for i, sel in enumerate(sels):
 
             st.success(f"已完成 {len(done)}：{sorted(done)}")
             st.error(f"未完成 {len(not_done)}：{sorted(not_done)}")
-
-# ================= 自动刷新 =================
-if is_admin:
-    auto = st.sidebar.checkbox("开启实时同步", value=True)
-    if auto:
-        time.sleep(5)
-        st.rerun()

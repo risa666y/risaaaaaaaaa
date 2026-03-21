@@ -14,6 +14,7 @@ INDEX_FILE = f"{SAVE_DIR}/index.json"
 SHOW_FILE = f"{SAVE_DIR}/show_tables.json"
 SELECT_FILE = f"{SAVE_DIR}/select_options.json"
 PROGRESS_FILE = f"{SAVE_DIR}/progress.json"
+NOTICE_FILE = f"{SAVE_DIR}/notice.json"  # ✅ 公告文件
 
 # ================= 用户 =================
 SUPPLIER_CONFIG = {
@@ -98,7 +99,6 @@ def load_excel(tid):
         df.columns = df.columns.str.strip()
         df = df.astype(str).apply(lambda col: col.str.strip())
 
-        # 唯一ID
         if "ID" not in df.columns:
             df.insert(0, "ID", [uuid.uuid4().hex[:8] for _ in range(len(df))])
 
@@ -125,14 +125,6 @@ if saved_user and not st.session_state.user:
     if saved_user in ADMIN_USERS or saved_user in USER_MAP:
         st.session_state.user = saved_user
 
-if "history_users" not in st.session_state:
-    st.session_state.history_users = []
-
-history = st.session_state.history_users
-
-if saved_user and saved_user not in history:
-    history.append(saved_user)
-
 with st.sidebar:
     st.subheader("🔐 登录")
 
@@ -145,19 +137,14 @@ with st.sidebar:
             st.rerun()
 
     else:
-        with st.form("login_form"):
-            user_input = st.text_input("登录账号")
-
-            submit = st.form_submit_button("登录")
-
-            if submit:
-                if user_input in ADMIN_USERS or user_input in USER_MAP:
-                    st.session_state.user = user_input
-                    st.query_params["user"] = user_input
-                    st.success("登录成功")
-                    st.rerun()
-                else:
-                    st.error("用户不存在")
+        user_input = st.text_input("登录账号")
+        if st.button("登录"):
+            if user_input in ADMIN_USERS or user_input in USER_MAP:
+                st.session_state.user = user_input
+                st.query_params["user"] = user_input
+                st.rerun()
+            else:
+                st.error("用户不存在")
 
 user = st.session_state.user
 if not user:
@@ -278,9 +265,33 @@ for i, sel in enumerate(sels):
         tid = mp[sel]
         df = load_excel(tid)
 
+        # ================= 公告 =================
+        notice_all = load_json(NOTICE_FILE, {})
+        notice_text = notice_all.get(tid, "")
+
+        st.markdown("### 📢 公告")
+
+        if is_admin:
+            new_notice = st.text_area(
+                "编辑公告",
+                value=notice_text,
+                key=f"notice_{tid}"
+            )
+
+            if st.button(f"保存公告_{tid}"):
+                notice_all[tid] = new_notice
+                save_json(notice_all, NOTICE_FILE)
+                st.success("公告已保存")
+                st.rerun()
+        else:
+            if notice_text:
+                st.info(notice_text)
+            else:
+                st.caption("暂无公告")
+
+        # ================= 表格 =================
         if not is_admin:
             supplier = USER_MAP[user].strip()
-
             df_edit = df[
                 df["供应商简称"].astype(str).str.contains(
                     supplier,

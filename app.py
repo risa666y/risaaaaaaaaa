@@ -4,6 +4,7 @@ import os
 import json
 import hashlib
 import time
+import uuid
 
 st.set_page_config(layout="wide")
 
@@ -14,7 +15,7 @@ INDEX_FILE = f"{SAVE_DIR}/index.json"
 SHOW_FILE = f"{SAVE_DIR}/show_tables.json"
 SELECT_FILE = f"{SAVE_DIR}/select_options.json"
 
-# ================= 用户（已优化） =================
+# ================= 用户（已更新） =================
 SUPPLIER_CONFIG = {
     "纪梵黎": ["代**"],
     "铭润": ["dryson", "7Zz"],
@@ -53,21 +54,26 @@ SUPPLIER_CONFIG = {
     "博果": ["Ai"],
     "魅裙": ["Eiker"],
     "初纷梦": ["熊妮"],
-    "卡奇豪": ["卡奇豪"],  # ✅ 已修复
+    "卡奇豪": ["卡奇豪"],
     "合凡": ["起风了"],
     "博果尔": ["刘权"],
     "青罗帐": ["青罗帐"],
     "金鸣": ["金鸣"],
     "龙馨": ["龙馨"],
-    "独秀": ["老虎"]
+    "独秀": ["老虎"],
+
+    # ✅ 新增
+    "恒尚": ["A小康先森"],
+    "福蕾雅": ["严金虹"],
+    "杰祥": ["金刚小婷", "杰祥服饰"]
 }
 
-# ✅ 管理员账号修改
+# 管理员
 ADMIN_USERS = {"RISA"}
 
 USER_MAP = {u: k for k, v in SUPPLIER_CONFIG.items() for u in v}
 
-# ✅ 防重复账号
+# 防重复账号
 all_users = [u for v in SUPPLIER_CONFIG.values() for u in v]
 if len(all_users) != len(set(all_users)):
     st.error("⚠️ 存在重复用户名，请检查 SUPPLIER_CONFIG")
@@ -79,19 +85,28 @@ def load_json(path, default):
     return default
 
 def save_json(data, path):
-    json.dump(data, open(path, "w", encoding="utf-8"), ensure_ascii=False, indent=2)
+    tmp = path + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as f:
+        json.dump(data, f, ensure_ascii=False, indent=2)
+    os.replace(tmp, path)
 
 def gen_id(name):
-    return hashlib.md5((name+str(pd.Timestamp.now())).encode()).hexdigest()[:10]
+    return uuid.uuid4().hex[:12]
 
 def save_excel(df, tid):
-    df.to_excel(f"{SAVE_DIR}/{tid}.xlsx", index=False)
+    path = f"{SAVE_DIR}/{tid}.xlsx"
+
+    if os.path.exists(path):
+        backup = f"{SAVE_DIR}/{tid}_{int(time.time())}.bak.xlsx"
+        os.rename(path, backup)
+
+    df.to_excel(path, index=False)
 
 def load_excel(tid):
     path = f"{SAVE_DIR}/{tid}.xlsx"
     if os.path.exists(path):
         df = pd.read_excel(path, dtype=str).fillna("")
-        df = df.applymap(lambda x: str(x).strip())
+        df = df.astype(str).apply(lambda col: col.str.strip())
 
         if "ID" not in df.columns:
             df.insert(0, "ID", range(len(df)))
@@ -119,7 +134,6 @@ if "history_users" not in st.session_state:
 history = st.session_state.history_users
 
 with st.sidebar:
-
     st.subheader("🔐 登录")
 
     with st.form("login_form"):
@@ -127,7 +141,7 @@ with st.sidebar:
         submit = st.form_submit_button("登录")
 
     if user_input:
-        matches = [u for u in history if user_input in u]
+        matches = [u for u in history if u.startswith(user_input)]
         if matches:
             st.caption("历史账号： " + " / ".join(matches))
 
@@ -324,5 +338,5 @@ if is_admin:
     auto = st.sidebar.checkbox("开启实时同步", value=True)
 
     if auto:
-        time.sleep(2)
+        time.sleep(5)
         st.rerun()

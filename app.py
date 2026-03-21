@@ -111,27 +111,62 @@ def get_tables():
         mp[label] = tid
     return sorted(opts, reverse=True), mp
 
-# ================= 登录 =================
+# ================= 登录（自动登录 + 记住账号） =================
 if "user" not in st.session_state:
     st.session_state.user = None
+
+query_params = st.query_params
+saved_user = query_params.get("user", [None])[0]
+
+# 自动登录
+if saved_user and not st.session_state.user:
+    if saved_user in ADMIN_USERS or saved_user in USER_MAP:
+        st.session_state.user = saved_user
+
+if "history_users" not in st.session_state:
+    st.session_state.history_users = []
+
+history = st.session_state.history_users
+
+if saved_user and saved_user not in history:
+    history.append(saved_user)
 
 with st.sidebar:
     st.subheader("🔐 登录")
 
-    user_input = st.text_input("登录账号")
-
-    if st.button("登录"):
-        if user_input in ADMIN_USERS or user_input in USER_MAP:
-            st.session_state.user = user_input
-            st.success("登录成功")
-            st.rerun()
-        else:
-            st.error("用户不存在")
-
     if st.session_state.user:
+        st.success(f"当前用户：{st.session_state.user}")
+
         if st.button("退出"):
             st.session_state.user = None
+            st.query_params.clear()
             st.rerun()
+
+    else:
+        with st.form("login_form", clear_on_submit=False):
+
+            user_input = st.text_input("登录账号")
+
+            if user_input:
+                matches = [u for u in history if u.startswith(user_input)]
+                if matches:
+                    st.caption("历史账号：" + " / ".join(matches))
+
+            submit = st.form_submit_button("登录")
+
+            if submit:
+                if user_input in ADMIN_USERS or user_input in USER_MAP:
+
+                    st.session_state.user = user_input
+                    st.query_params["user"] = user_input
+
+                    if user_input not in history:
+                        history.append(user_input)
+
+                    st.success("登录成功")
+                    st.rerun()
+                else:
+                    st.error("用户不存在")
 
 user = st.session_state.user
 if not user:
@@ -254,7 +289,6 @@ for i, sel in enumerate(sels):
         if not is_admin:
             supplier = USER_MAP[user].strip()
 
-            # ✅ 关键修改：支持 (4DP)杰祥
             df_edit = df[
                 df["供应商简称"].astype(str).str.contains(supplier, na=False)
             ].copy()

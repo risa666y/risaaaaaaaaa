@@ -111,14 +111,13 @@ def get_tables():
         mp[label] = tid
     return sorted(opts, reverse=True), mp
 
-# ================= 登录（自动登录 + 记住账号） =================
+# ================= 登录（自动登录） =================
 if "user" not in st.session_state:
     st.session_state.user = None
 
 query_params = st.query_params
 saved_user = query_params.get("user", [None])[0]
 
-# 自动登录
 if saved_user and not st.session_state.user:
     if saved_user in ADMIN_USERS or saved_user in USER_MAP:
         st.session_state.user = saved_user
@@ -144,7 +143,6 @@ with st.sidebar:
 
     else:
         with st.form("login_form", clear_on_submit=False):
-
             user_input = st.text_input("登录账号")
 
             if user_input:
@@ -156,7 +154,6 @@ with st.sidebar:
 
             if submit:
                 if user_input in ADMIN_USERS or user_input in USER_MAP:
-
                     st.session_state.user = user_input
                     st.query_params["user"] = user_input
 
@@ -204,21 +201,23 @@ if is_admin:
 # ================= 表格列表 =================
 options, mp = get_tables()
 
-# ================= 展示控制 =================
-st.sidebar.subheader("👁️ 表格展示")
-
+# ================= 展示控制（仅管理员） =================
 show_cfg = load_json(SHOW_FILE, [])
-new_show = []
 
-for label in options:
-    tid_tmp = mp[label]
-    if st.sidebar.checkbox(label, value=(tid_tmp in show_cfg)):
-        new_show.append(tid_tmp)
+if is_admin:
+    st.sidebar.subheader("👁️ 表格展示")
 
-if set(new_show) != set(show_cfg):
-    save_json(new_show, SHOW_FILE)
-    st.sidebar.success("已自动保存")
-    st.rerun()
+    new_show = []
+
+    for label in options:
+        tid_tmp = mp[label]
+        if st.sidebar.checkbox(label, value=(tid_tmp in show_cfg)):
+            new_show.append(tid_tmp)
+
+    if set(new_show) != set(show_cfg):
+        save_json(new_show, SHOW_FILE)
+        st.sidebar.success("已自动保存")
+        st.rerun()
 
 # ================= 删除 =================
 if is_admin:
@@ -289,8 +288,13 @@ for i, sel in enumerate(sels):
         if not is_admin:
             supplier = USER_MAP[user].strip()
 
+            # ✅ 只做“包含匹配”
             df_edit = df[
-                df["供应商简称"].astype(str).str.contains(supplier, na=False)
+                df["供应商简称"].astype(str).str.contains(
+                    supplier,
+                    case=False,
+                    na=False
+                )
             ].copy()
         else:
             df_edit = df.copy()
@@ -336,7 +340,11 @@ for i, sel in enumerate(sels):
 
                         mask = (
                             (full_df["ID"] == row["ID"]) &
-                            (full_df["供应商简称"].astype(str).str.contains(supplier))
+                            (full_df["供应商简称"].astype(str).str.contains(
+                                supplier,
+                                case=False,
+                                na=False
+                            ))
                         )
 
                         full_df.loc[mask, col] = val

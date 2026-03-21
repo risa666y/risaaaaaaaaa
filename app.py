@@ -14,8 +14,9 @@ os.makedirs(SAVE_DIR, exist_ok=True)
 INDEX_FILE = f"{SAVE_DIR}/index.json"
 SHOW_FILE = f"{SAVE_DIR}/show_tables.json"
 SELECT_FILE = f"{SAVE_DIR}/select_options.json"
+PROGRESS_FILE = f"{SAVE_DIR}/progress.json"  # ✅ 新增
 
-# ================= 用户（已更新） =================
+# ================= 用户 =================
 SUPPLIER_CONFIG = {
     "纪梵黎": ["代**"],
     "铭润": ["dryson", "7Zz"],
@@ -68,7 +69,6 @@ SUPPLIER_CONFIG = {
     "杰祥": ["金刚小婷", "杰祥服饰"]
 }
 
-# 管理员
 ADMIN_USERS = {"RISA"}
 
 USER_MAP = {u: k for k, v in SUPPLIER_CONFIG.items() for u in v}
@@ -306,32 +306,60 @@ def auto_save():
 
     if is_admin:
         save_excel(edited, tid)
-        st.success("保存成功")
-        st.rerun()
-        return
+    else:
+        supplier = USER_MAP[user].strip()
 
-    supplier = USER_MAP[user].strip()
+        for _, row in edited.iterrows():
+            for col in edited.columns:
+                new_val = str(row[col]).strip()
+                if new_val == "":
+                    continue
 
-    for _, row in edited.iterrows():
-        for col in edited.columns:
-            new_val = str(row[col]).strip()
-            if new_val == "":
-                continue
+                mask = (
+                    (full_df["ID"] == row["ID"]) &
+                    (full_df["供应商简称"].str.strip() == supplier)
+                )
 
-            mask = (
-                (full_df["ID"] == row["ID"]) &
-                (full_df["供应商简称"].str.strip() == supplier)
-            )
+                full_df.loc[mask, col] = new_val
 
-            full_df.loc[mask, col] = new_val
+        save_excel(full_df, tid)
 
-    save_excel(full_df, tid)
+        # ✅ 记录进度
+        progress = load_json(PROGRESS_FILE, {})
+        if tid not in progress:
+            progress[tid] = []
 
-    st.success("✅ 已同步到管理端")
+        if supplier not in progress[tid]:
+            progress[tid].append(supplier)
+
+        save_json(progress, PROGRESS_FILE)
+
+    st.success("💾 保存成功")
     st.rerun()
 
 if st.button("💾 保存"):
     auto_save()
+
+# ================= 进度展示（管理员） =================
+if is_admin:
+    st.subheader("📊 填写进度")
+
+    progress = load_json(PROGRESS_FILE, {})
+    done_suppliers = set(progress.get(tid, []))
+
+    all_suppliers = set(df["供应商简称"].str.strip().unique())
+
+    not_done = all_suppliers - done_suppliers
+
+    col1, col2 = st.columns(2)
+
+    with col1:
+        st.success(f"✅ 已完成 ({len(done_suppliers)})")
+        st.write(sorted(done_suppliers))
+
+    with col2:
+        st.error(f"❌ 未完成 ({len(not_done)})")
+        st.write(sorted(not_done))
 
 # ================= 自动刷新 =================
 if is_admin:

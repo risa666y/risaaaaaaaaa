@@ -60,40 +60,49 @@ def get_tables():
         mp[label] = tid
     return sorted(opts, reverse=True), mp
 
-# ================= 登录（稳定版） =================
+
+# ================= 登录（单行 + 回车） =================
 if "user" not in st.session_state:
     st.session_state.user = None
 
-with st.sidebar:
-    st.title("🔐 登录")
+if "history_users" not in st.session_state:
+    st.session_state.history_users = []
 
-    if "history_users" not in st.session_state:
-        st.session_state.history_users = []
+history = st.session_state.history_users
 
-    history = st.session_state.history_users
+# 登录表单（支持回车）
+with st.form("login_form", clear_on_submit=False):
 
-    selected_user = st.selectbox(
-        "选择历史账号",
-        options=[""] + history
-    )
+    col1, col2 = st.columns([6,1])
 
-    input_user = st.text_input("输入用户名")
+    with col1:
+        user_input = st.selectbox(
+            "登录账号",
+            options=[""] + history,
+            key="login_select",
+            placeholder="输入或选择账号"
+        )
 
-    final_user = input_user.strip() if input_user else selected_user.strip()
+    with col2:
+        submit = st.form_submit_button("登录")
 
-    if st.button("登录"):
-        if final_user in ADMIN_USERS or final_user in USER_MAP:
+# 登录逻辑
+if submit:
+    final_user = st.session_state.get("login_select", "").strip()
 
-            st.session_state.user = final_user
+    if final_user in ADMIN_USERS or final_user in USER_MAP:
+        st.session_state.user = final_user
 
-            if final_user not in st.session_state.history_users:
-                st.session_state.history_users.append(final_user)
+        if final_user not in history:
+            history.append(final_user)
 
-            st.success("登录成功")
-            st.rerun()
-        else:
-            st.error("用户不存在")
+        st.success("登录成功")
+        st.rerun()
+    else:
+        st.error("用户不存在")
 
+# 退出
+if st.session_state.user:
     if st.button("退出"):
         st.session_state.user = None
         st.rerun()
@@ -103,6 +112,7 @@ if not user:
     st.stop()
 
 is_admin = user in ADMIN_USERS
+
 
 # ================= 上传 =================
 if is_admin:
@@ -131,8 +141,10 @@ if is_admin:
         st.sidebar.success("上传完成")
         st.rerun()
 
+
 # ================= 表格列表 =================
 options, mp = get_tables()
+
 
 # ================= 展示 / 删除 =================
 if is_admin:
@@ -176,10 +188,12 @@ if not options:
     st.warning("暂无表格")
     st.stop()
 
+
 # ================= 选表 =================
 sel = st.selectbox("选择表格", options)
 tid = mp[sel]
 df = load_excel(tid)
+
 
 # ================= 权限 =================
 if not is_admin:
@@ -187,6 +201,7 @@ if not is_admin:
     df_edit = df[df["供应商简称"].str.strip() == supplier].copy()
 else:
     df_edit = df.copy()
+
 
 # ================= 下拉配置 =================
 if is_admin:
@@ -214,6 +229,7 @@ if is_admin:
         st.sidebar.success("已保存")
         st.rerun()
 
+
 # ================= 应用下拉 =================
 select_all = load_json(SELECT_FILE, {})
 select_cfg = select_all.get(tid, {})
@@ -227,6 +243,7 @@ for col, opts in select_cfg.items():
     if col in df_edit.columns:
         column_config[col] = st.column_config.SelectboxColumn(options=opts)
 
+
 # ================= 表格 =================
 edited = st.data_editor(
     df_edit,
@@ -235,6 +252,7 @@ edited = st.data_editor(
     column_config=column_config,
     key=f"editor_{tid}_{user}"
 )
+
 
 # ================= 保存 =================
 def auto_save():
@@ -270,8 +288,10 @@ def auto_save():
     st.success("✅ 已同步到管理端")
     st.rerun()
 
+
 if st.button("💾 保存"):
     auto_save()
+
 
 # ================= 管理端自动刷新 =================
 if is_admin:

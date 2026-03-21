@@ -60,120 +60,36 @@ def get_tables():
         mp[label] = tid
     return sorted(opts, reverse=True), mp
 
-# ================= 登录 =================
+# ================= 登录（稳定版） =================
 if "user" not in st.session_state:
     st.session_state.user = None
 
 with st.sidebar:
     st.title("🔐 登录")
 
-    st.components.v1.html("""
-    <style>
-    .login-box { position: relative; }
-    .dropdown {
-        position: absolute;
-        top: 38px;
-        left: 0;
-        width: 100%;
-        background: white;
-        border: 1px solid #ddd;
-        border-radius: 6px;
-        box-shadow: 0 4px 12px rgba(0,0,0,0.1);
-        max-height: 200px;
-        overflow-y: auto;
-        display: none;
-        z-index: 9999;
-    }
-    .item { padding: 8px; cursor: pointer; }
-    .item:hover { background: #f5f5f5; }
-    </style>
+    if "history_users" not in st.session_state:
+        st.session_state.history_users = []
 
-    <div class="login-box">
-        <input id="user_input" placeholder="请输入用户名" style="width:100%;padding:6px;" />
-        <div id="dropdown" class="dropdown"></div>
-    </div>
+    history = st.session_state.history_users
 
-    <button onclick="login()" style="width:100%;margin-top:8px;">登录</button>
+    selected_user = st.selectbox(
+        "选择历史账号",
+        options=[""] + history
+    )
 
-    <script>
-    const input = document.getElementById("user_input");
-    const dropdown = document.getElementById("dropdown");
+    input_user = st.text_input("输入用户名")
 
-    let arr = localStorage.getItem("saved_usernames");
-    arr = arr ? JSON.parse(arr) : [];
+    final_user = input_user.strip() if input_user else selected_user.strip()
 
-    function renderList(){
-        dropdown.innerHTML = "";
-        arr.forEach(u => {
-            const div = document.createElement("div");
-            div.className = "item";
-            div.innerText = u;
-            div.onclick = () => {
-                input.value = u;
-                dropdown.style.display = "none";
-            };
-            dropdown.appendChild(div);
-        });
-    }
+    if st.button("登录"):
+        if final_user in ADMIN_USERS or final_user in USER_MAP:
 
-    renderList();
+            st.session_state.user = final_user
 
-    if(arr.length > 0){
-        input.value = arr[arr.length - 1];
-    }
+            if final_user not in st.session_state.history_users:
+                st.session_state.history_users.append(final_user)
 
-    input.addEventListener("focus", () => {
-        dropdown.style.display = "block";
-    });
-
-    document.addEventListener("click", (e) => {
-        if(!e.target.closest(".login-box")){
-            dropdown.style.display = "none";
-        }
-    });
-
-    function login(){
-        const val = input.value || "";
-        const url = new URL(window.location);
-        url.searchParams.set("login_user", val);
-        window.location.href = url.toString();
-    }
-
-    input.addEventListener("keydown", function(e){
-        if(e.key === "Enter"){
-            login();
-        }
-    });
-    </script>
-    """, height=180)
-
-    # ===== 接收登录 =====
-    params = st.experimental_get_query_params()
-
-    if "login_user" in params:
-        username = params["login_user"][0]
-        username = username.replace("\u00A0", "")
-        username = username.replace("\n", "").replace("\r", "")
-        username = username.strip()
-
-        if username in ADMIN_USERS or username in USER_MAP:
-
-            # 保存历史
-            st.components.v1.html(f"""
-            <script>
-            let arr = localStorage.getItem("saved_usernames");
-            arr = arr ? JSON.parse(arr) : [];
-
-            if(!arr.includes("{username}")) {{
-                arr.push("{username}");
-            }}
-
-            localStorage.setItem("saved_usernames", JSON.stringify(arr));
-            </script>
-            """, height=0)
-
-            st.session_state.user = username
-            st.experimental_set_query_params()
+            st.success("登录成功")
             st.rerun()
         else:
             st.error("用户不存在")

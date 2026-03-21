@@ -67,69 +67,117 @@ if "user" not in st.session_state:
 with st.sidebar:
     st.title("🔐 登录")
 
-    login_val = st.components.v1.html("""
-    <input list="userlist" id="user_input" placeholder="请输入用户名" style="width:100%;padding:6px;" />
-    <datalist id="userlist"></datalist>
-    <button onclick="sendLogin()" style="width:100%;margin-top:5px;">登录</button>
+    st.components.v1.html("""
+    <style>
+    .login-box { position: relative; }
+    .dropdown {
+        position: absolute;
+        top: 38px;
+        left: 0;
+        width: 100%;
+        background: white;
+        border: 1px solid #ddd;
+        border-radius: 6px;
+        box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+        max-height: 200px;
+        overflow-y: auto;
+        display: none;
+        z-index: 9999;
+    }
+    .item {
+        padding: 8px;
+        cursor: pointer;
+    }
+    .item:hover {
+        background: #f5f5f5;
+    }
+    </style>
+
+    <div class="login-box">
+        <input id="user_input" placeholder="请输入用户名" style="width:100%;padding:6px;" />
+        <div id="dropdown" class="dropdown"></div>
+    </div>
+
+    <button onclick="login()" style="width:100%;margin-top:8px;">登录</button>
 
     <script>
     const input = document.getElementById("user_input");
-    const datalist = document.getElementById("userlist");
+    const dropdown = document.getElementById("dropdown");
 
     let arr = localStorage.getItem("saved_usernames");
     arr = arr ? JSON.parse(arr) : [];
 
-    datalist.innerHTML = "";
-    arr.forEach(u => {
-        let option = document.createElement("option");
-        option.value = u;
-        datalist.appendChild(option);
-    });
+    function renderList(){
+        dropdown.innerHTML = "";
+        arr.forEach(u => {
+            const div = document.createElement("div");
+            div.className = "item";
+            div.innerText = u;
+            div.onclick = () => {
+                input.value = u;
+                dropdown.style.display = "none";
+            };
+            dropdown.appendChild(div);
+        });
+    }
+
+    renderList();
 
     if(arr.length > 0){
         input.value = arr[arr.length - 1];
     }
 
-    function sendLogin(){
+    input.addEventListener("focus", () => {
+        dropdown.style.display = "block";
+    });
+
+    document.addEventListener("click", (e) => {
+        if(!e.target.closest(".login-box")){
+            dropdown.style.display = "none";
+        }
+    });
+
+    function login(){
         const val = input.value || "";
-        const streamlitEvent = new CustomEvent("streamlit:setComponentValue", {
-            detail: val
-        });
-        window.dispatchEvent(streamlitEvent);
+        const url = new URL(window.location);
+        url.searchParams.set("login_user", val);
+        window.location.href = url.toString();
     }
 
     input.addEventListener("keydown", function(e){
         if(e.key === "Enter"){
-            sendLogin();
+            login();
         }
     });
     </script>
-    """, height=120)
+    """, height=180)
 
-    # ✅ 修复 None 报错（关键）
-    if login_val is not None and str(login_val).strip() != "":
-        username = str(login_val).strip()
+    params = st.experimental_get_query_params()
 
-        if username in ADMIN_USERS or username in USER_MAP:
+    if "login_user" in params:
+        username = params["login_user"][0].strip()
 
-            # 保存历史
-            st.components.v1.html(f"""
-            <script>
-            let arr = localStorage.getItem("saved_usernames");
-            arr = arr ? JSON.parse(arr) : [];
+        if username:
+            if username in ADMIN_USERS or username in USER_MAP:
 
-            if(!arr.includes("{username}")) {{
-                arr.push("{username}");
-            }}
+                st.components.v1.html(f"""
+                <script>
+                let arr = localStorage.getItem("saved_usernames");
+                arr = arr ? JSON.parse(arr) : [];
 
-            localStorage.setItem("saved_usernames", JSON.stringify(arr));
-            </script>
-            """, height=0)
+                if(!arr.includes("{username}")) {{
+                    arr.push("{username}");
+                }}
 
-            st.session_state.user = username
-            st.rerun()
-        else:
-            st.error("用户不存在")
+                localStorage.setItem("saved_usernames", JSON.stringify(arr));
+                </script>
+                """, height=0)
+
+                st.session_state.user = username
+                st.experimental_set_query_params()
+                st.rerun()
+            else:
+                st.error("用户不存在")
 
     if st.button("退出"):
         st.session_state.user = None

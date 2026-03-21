@@ -25,17 +25,15 @@ def get_conn():
     return sqlite3.connect(DB_FILE, check_same_thread=False)
 
 def save_to_db(df, tid):
-    conn = get_conn()
-    df.to_sql(tid, conn, if_exists="replace", index=False)
-    conn.close()
+    with get_conn() as conn:
+        df.to_sql(tid, conn, if_exists="replace", index=False)
 
 def load_table(tid):
-    conn = get_conn()
-    try:
-        df = pd.read_sql(f"SELECT * FROM '{tid}'", conn)
-    except:
-        df = pd.DataFrame()
-    conn.close()
+    with get_conn() as conn:
+        try:
+            df = pd.read_sql(f"SELECT * FROM '{tid}'", conn)
+        except:
+            df = pd.DataFrame()
 
     if not df.empty:
         df = df.fillna("").astype(str)
@@ -128,27 +126,6 @@ def get_tables():
 if "user" not in st.session_state:
     st.session_state.user = None
 
-# ⭐ 稳定自动登录（关键修复）
-if "local_user_loaded" not in st.session_state:
-    st.session_state.local_user_loaded = False
-
-if not st.session_state.local_user_loaded:
-    result = streamlit_js_eval(
-        js_expressions="localStorage.getItem('current_user')",
-        key="get_current_user"
-    )
-
-    if result is not None:
-        try:
-            user_from_local = result.strip('"')
-            if user_from_local in ADMIN_USERS or user_from_local in USER_MAP:
-                st.session_state.user = user_from_local
-        except:
-            pass
-
-        st.session_state.local_user_loaded = True
-        st.rerun()
-
 query_params = st.query_params
 saved_user = query_params.get("user", [None])[0]
 
@@ -169,18 +146,10 @@ with st.sidebar:
 
     if st.session_state.user:
         st.success(f"当前用户：{st.session_state.user}")
-
         if st.button("退出"):
             st.session_state.user = None
-
-            streamlit_js_eval(
-                js_expressions="localStorage.removeItem('current_user')",
-                key="clear_user"
-            )
-
             st.query_params.clear()
             st.rerun()
-
     else:
         with st.form("login_form"):
             user_input = st.text_input("登录账号", value=last_user)
@@ -191,11 +160,6 @@ with st.sidebar:
                     st.session_state.user = user_input
                     st.query_params["user"] = user_input
 
-                    streamlit_js_eval(
-                        js_expressions=f"localStorage.setItem('current_user', '{user_input}')",
-                        key="set_current_user"
-                    )
-
                     if user_input not in history:
                         history.append(user_input)
 
@@ -203,7 +167,6 @@ with st.sidebar:
                         js_expressions=f"localStorage.setItem('history_users', '{json.dumps(history)}')",
                         key="set_history"
                     )
-
                     st.rerun()
                 else:
                     st.error("用户不存在")
@@ -272,9 +235,8 @@ if is_admin:
     if st.sidebar.button("删除") and del_label:
         tid_del = mp[del_label]
 
-        conn = get_conn()
-        conn.execute(f"DROP TABLE IF EXISTS '{tid_del}'")
-        conn.close()
+        with get_conn() as conn:
+            conn.execute(f"DROP TABLE IF EXISTS '{tid_del}'")
 
         idx = load_json(INDEX_FILE, {})
         idx.pop(tid_del, None)
@@ -348,9 +310,7 @@ for i, sel in enumerate(sels):
         # 表格
         if not is_admin:
             supplier = USER_MAP[user].strip()
-            df_edit = df[
-                df["供应商简称"].astype(str).str.contains(supplier, case=False, na=False)
-            ].copy()
+            df_edit = df[df["供应商简称"] == supplier].copy()
         else:
             df_edit = df.copy()
 
@@ -376,36 +336,48 @@ for i, sel in enumerate(sels):
 
         if st.button(f"💾 保存：{sel}", key=f"save_{tid}"):
 
-            conn = get_conn()
+            with get_conn() as conn:
 
-            if is_admin:
-                edited.to_sql(tid, conn, if_exists="replace", index=False)
+                if is_admin:
+                    edited.to_sql(tid, conn, if_exists="replace", index=False)
 
-            else:
-                supplier = USER_MAP[user].strip()
+                else:
+                    supplier = USER_MAP[user].strip()
 
-                for _, row in edited.iterrows():
-                    rid = row["ID"]
+                    original_df = df_edit.set_index("ID")
+                    edited_df = edited.set_index("ID")
 
-                    for col in edited.columns:
-                        val = str(row[col]).strip()
+                    changed_mask = edited_df.ne(original_df)
+                    changed_rows = changed_mask.any(axis=1)
+                    rows_to_update = edited_df[changed_rows]
 
-                        conn.execute(f"""
-                            UPDATE '{tid}'
-                            SET "{col}" = ?
-                            WHERE ID = ? AND "供应商简称" LIKE ?
-                        """, (val, rid, f"%{supplier}%"))
+                    conn.execute("BEGIN")
 
-                conn.commit()
+                    for rid, row in rows_to_update.iterrows():
 
-                progress = load_json(PROGRESS_FILE, {})
-                progress.setdefault(tid, [])
-                if supplier not in progress[tid]:
-                    progress[tid].append(supplier)
+                        changed_cols = changed_mask.loc[rid]
+                        cols_to_update = changed_cols[changed_cols].index.tolist()
 
-                save_json(progress, PROGRESS_FILE)
+                        for col in cols_to_update:
+                            if col not in original_df.columns:
+                                continue
 
-            conn.close()
+                            val = str(row[col]).strip()
+
+                            conn.execute(f"""
+                                UPDATE '{tid}'
+                                SET "{col}" = ?
+                                WHERE ID = ? AND "供应商简称" = ?
+                            """, (val, rid, supplier))
+
+                    conn.commit()
+
+                    progress = load_json(PROGRESS_FILE, {})
+                    progress.setdefault(tid, [])
+                    if supplier not in progress[tid]:
+                        progress[tid].append(supplier)
+
+                    save_json(progress, PROGRESS_FILE)
 
             st.success("已保存")
             st.rerun()

@@ -61,7 +61,7 @@ def get_tables():
     return sorted(opts, reverse=True), mp
 
 
-# ================= 登录（单行 + 回车） =================
+# ================= 登录（最终优化版） =================
 if "user" not in st.session_state:
     st.session_state.user = None
 
@@ -70,25 +70,29 @@ if "history_users" not in st.session_state:
 
 history = st.session_state.history_users
 
-# 登录表单（支持回车）
-with st.form("login_form", clear_on_submit=False):
+with st.form("login_form"):
 
-    col1, col2 = st.columns([6,1])
+    col1, col2 = st.columns([5,1])
 
     with col1:
-        user_input = st.selectbox(
+        user_input = st.text_input(
             "登录账号",
-            options=[""] + history,
-            key="login_select",
-            placeholder="输入或选择账号"
+            placeholder="输入账号（支持历史提示）",
+            key="login_input"
         )
 
     with col2:
         submit = st.form_submit_button("登录")
 
-# 登录逻辑
+# 历史提示（轻量，不占空间）
+if user_input:
+    matches = [u for u in history if user_input in u]
+    if matches:
+        st.caption("历史账号： " + " / ".join(matches))
+
+# 登录逻辑（支持回车）
 if submit:
-    final_user = st.session_state.get("login_select", "").strip()
+    final_user = user_input.strip()
 
     if final_user in ADMIN_USERS or final_user in USER_MAP:
         st.session_state.user = final_user

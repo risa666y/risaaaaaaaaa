@@ -98,7 +98,7 @@ def load_excel(tid):
         df.columns = df.columns.str.strip()
         df = df.astype(str).apply(lambda col: col.str.strip())
 
-        # ✅ 修复：ID 永久唯一
+        # 唯一ID
         if "ID" not in df.columns:
             df.insert(0, "ID", [uuid.uuid4().hex[:8] for _ in range(len(df))])
 
@@ -145,13 +145,8 @@ with st.sidebar:
             st.rerun()
 
     else:
-        with st.form("login_form", clear_on_submit=False):
+        with st.form("login_form"):
             user_input = st.text_input("登录账号")
-
-            if user_input:
-                matches = [u for u in history if u.startswith(user_input)]
-                if matches:
-                    st.caption("历史账号：" + " / ".join(matches))
 
             submit = st.form_submit_button("登录")
 
@@ -159,10 +154,6 @@ with st.sidebar:
                 if user_input in ADMIN_USERS or user_input in USER_MAP:
                     st.session_state.user = user_input
                     st.query_params["user"] = user_input
-
-                    if user_input not in history:
-                        history.append(user_input)
-
                     st.success("登录成功")
                     st.rerun()
                 else:
@@ -188,7 +179,6 @@ if is_admin:
                 st.sidebar.error(f"{f.name}缺少【供应商简称】列")
                 continue
 
-            # ✅ 初始化唯一ID
             df.insert(0, "ID", [uuid.uuid4().hex[:8] for _ in range(len(df))])
 
             tid = gen_id()
@@ -214,7 +204,6 @@ if is_admin:
     st.sidebar.subheader("👁️ 表格展示")
 
     new_show = []
-
     for label in options:
         tid_tmp = mp[label]
         if st.sidebar.checkbox(label, value=(tid_tmp in show_cfg)):
@@ -222,7 +211,6 @@ if is_admin:
 
     if set(new_show) != set(show_cfg):
         save_json(new_show, SHOW_FILE)
-        st.sidebar.success("已自动保存")
         st.rerun()
 
 # ================= 删除 =================
@@ -230,19 +218,18 @@ if is_admin:
     st.sidebar.subheader("🗑 删除表格")
     del_label = st.sidebar.selectbox("选择删除", [""] + options)
 
-    if st.sidebar.button("删除"):
-        if del_label:
-            tid_del = mp[del_label]
+    if st.sidebar.button("删除") and del_label:
+        tid_del = mp[del_label]
 
-            if os.path.exists(f"{SAVE_DIR}/{tid_del}.xlsx"):
-                os.remove(f"{SAVE_DIR}/{tid_del}.xlsx")
+        if os.path.exists(f"{SAVE_DIR}/{tid_del}.xlsx"):
+            os.remove(f"{SAVE_DIR}/{tid_del}.xlsx")
 
-            idx = load_json(INDEX_FILE, {})
-            idx.pop(tid_del, None)
-            save_json(idx, INDEX_FILE)
+        idx = load_json(INDEX_FILE, {})
+        idx.pop(tid_del, None)
+        save_json(idx, INDEX_FILE)
 
-            st.sidebar.success("已删除")
-            st.rerun()
+        st.sidebar.success("已删除")
+        st.rerun()
 
 # ================= 下拉配置 =================
 if is_admin:
@@ -293,11 +280,18 @@ for i, sel in enumerate(sels):
 
         if not is_admin:
             supplier = USER_MAP[user].strip()
-            df_edit = df[df["供应商简称"].str.strip() == supplier].copy()
+
+            df_edit = df[
+                df["供应商简称"].astype(str).str.contains(
+                    supplier,
+                    case=False,
+                    na=False
+                )
+            ].copy()
         else:
             df_edit = df.copy()
 
-        # ✅ 下拉配置生效
+        # 下拉配置
         select_all = load_json(SELECT_FILE, {})
         select_cfg = select_all.get(tid, {})
 
@@ -332,19 +326,20 @@ for i, sel in enumerate(sels):
 
                     mask = (
                         (full_df["ID"] == rid) &
-                        (full_df["供应商简称"].str.strip() == supplier)
+                        (full_df["供应商简称"].astype(str).str.contains(
+                            supplier,
+                            case=False,
+                            na=False
+                        ))
                     )
 
-                    # ✅ 关键修复：不跳过空值
                     for col in edited.columns:
                         full_df.loc[mask, col] = str(row[col]).strip()
 
                 save_excel(full_df, tid)
 
                 progress = load_json(PROGRESS_FILE, {})
-                if tid not in progress:
-                    progress[tid] = []
-
+                progress.setdefault(tid, [])
                 if supplier not in progress[tid]:
                     progress[tid].append(supplier)
 

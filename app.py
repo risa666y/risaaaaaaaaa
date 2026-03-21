@@ -69,10 +69,6 @@ SUPPLIER_CONFIG = {
 ADMIN_USERS = {"RISA"}
 USER_MAP = {u: k for k, v in SUPPLIER_CONFIG.items() for u in v}
 
-all_users = [u for v in SUPPLIER_CONFIG.values() for u in v]
-if len(all_users) != len(set(all_users)):
-    st.error("⚠️ 存在重复用户名，请检查 SUPPLIER_CONFIG")
-
 # ================= 工具 =================
 def load_json(path, default):
     if os.path.exists(path):
@@ -99,6 +95,7 @@ def load_excel(tid):
     path = f"{SAVE_DIR}/{tid}.xlsx"
     if os.path.exists(path):
         df = pd.read_excel(path, dtype=str).fillna("")
+        df.columns = df.columns.str.strip()
         df = df.astype(str).apply(lambda col: col.str.strip())
         if "ID" not in df.columns:
             df.insert(0, "ID", range(len(df)))
@@ -118,28 +115,14 @@ def get_tables():
 if "user" not in st.session_state:
     st.session_state.user = None
 
-if "history_users" not in st.session_state:
-    st.session_state.history_users = []
-
-history = st.session_state.history_users
-
 with st.sidebar:
     st.subheader("🔐 登录")
 
-    with st.form("login_form"):
-        user_input = st.text_input("登录账号")
-        submit = st.form_submit_button("登录")
+    user_input = st.text_input("登录账号")
 
-    if user_input:
-        matches = [u for u in history if u.startswith(user_input)]
-        if matches:
-            st.caption("历史账号：" + " / ".join(matches))
-
-    if submit:
+    if st.button("登录"):
         if user_input in ADMIN_USERS or user_input in USER_MAP:
             st.session_state.user = user_input
-            if user_input not in history:
-                history.append(user_input)
             st.success("登录成功")
             st.rerun()
         else:
@@ -161,9 +144,10 @@ if is_admin:
     st.sidebar.subheader("📤 上传表格")
     files = st.sidebar.file_uploader("上传Excel", type=["xlsx"], accept_multiple_files=True)
 
-    if st.sidebar.button("确认上传"):
+    if files and st.sidebar.button("确认上传"):
         for f in files:
             df = pd.read_excel(f)
+            df.columns = df.columns.str.strip()
 
             if "供应商简称" not in df.columns:
                 st.sidebar.error(f"{f.name}缺少【供应商简称】列")
@@ -185,7 +169,7 @@ if is_admin:
 # ================= 表格列表 =================
 options, mp = get_tables()
 
-# ================= 展示控制（统一逻辑） =================
+# ================= 展示控制 =================
 st.sidebar.subheader("👁️ 表格展示")
 
 show_cfg = load_json(SHOW_FILE, [])
@@ -196,13 +180,12 @@ for label in options:
     if st.sidebar.checkbox(label, value=(tid_tmp in show_cfg)):
         new_show.append(tid_tmp)
 
-# ✅ 自动保存（关键优化）
 if set(new_show) != set(show_cfg):
     save_json(new_show, SHOW_FILE)
     st.sidebar.success("已自动保存")
     st.rerun()
 
-# ================= 删除（仅管理员） =================
+# ================= 删除 =================
 if is_admin:
     st.sidebar.subheader("🗑 删除表格")
     del_label = st.sidebar.selectbox("选择删除", [""] + options)
@@ -237,19 +220,14 @@ if is_admin:
         cols = st.sidebar.multiselect(
             "选择列",
             df_cfg.columns.tolist(),
-            default=list(old_cfg.keys()),
-            key=f"cols_{tid_cfg}"
+            default=list(old_cfg.keys())
         )
 
         new_cfg = {}
 
         for col in cols:
             default_val = ",".join(old_cfg.get(col, []))
-            txt = st.sidebar.text_area(
-                f"{col}选项",
-                value=default_val,
-                key=f"{tid_cfg}_{col}"
-            )
+            txt = st.sidebar.text_area(f"{col}选项", value=default_val)
             new_cfg[col] = [i.strip() for i in txt.split(",") if i.strip()]
 
         if st.sidebar.button("保存下拉配置"):
@@ -258,14 +236,13 @@ if is_admin:
             st.sidebar.success("已保存")
             st.rerun()
 
-# ================= ⭐核心：只展示左边勾选的 =================
+# ================= 展示 =================
 sels = [o for o in options if mp[o] in show_cfg]
 
 if not sels:
     st.warning("暂无可展示表格")
     st.stop()
 
-# ================= 表格展示 =================
 for i, sel in enumerate(sels):
 
     st.markdown("---")
@@ -276,7 +253,11 @@ for i, sel in enumerate(sels):
 
         if not is_admin:
             supplier = USER_MAP[user].strip()
-            df_edit = df[df["供应商简称"].str.strip() == supplier].copy()
+
+            # ✅ 关键修改：支持 (4DP)杰祥
+            df_edit = df[
+                df["供应商简称"].astype(str).str.contains(supplier, na=False)
+            ].copy()
         else:
             df_edit = df.copy()
 
@@ -321,7 +302,7 @@ for i, sel in enumerate(sels):
 
                         mask = (
                             (full_df["ID"] == row["ID"]) &
-                            (full_df["供应商简称"].str.strip() == supplier)
+                            (full_df["供应商简称"].astype(str).str.contains(supplier))
                         )
 
                         full_df.loc[mask, col] = val
@@ -340,7 +321,6 @@ for i, sel in enumerate(sels):
             st.success("已保存")
             st.rerun()
 
-        # 进度
         if is_admin:
             progress = load_json(PROGRESS_FILE, {})
             done = set(progress.get(tid, []))

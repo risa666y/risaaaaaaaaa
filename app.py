@@ -14,14 +14,63 @@ INDEX_FILE = f"{SAVE_DIR}/index.json"
 SHOW_FILE = f"{SAVE_DIR}/show_tables.json"
 SELECT_FILE = f"{SAVE_DIR}/select_options.json"
 
-# ================= 用户 =================
+# ================= 用户（已优化） =================
 SUPPLIER_CONFIG = {
-    "恒尚": ["A小康先森"],
-    "福蕾雅": ["严金虹"],
-    "杰祥": ["金刚小婷", "杰祥服饰"]
+    "纪梵黎": ["代**"],
+    "铭润": ["dryson", "7Zz"],
+    "康林": ["Tau"],
+    "卓黎凯": ["杨小方的小方"],
+    "依嘉依": ["陈"],
+    "华中": ["钧之", "木木"],
+    "函厦": ["邓红玫"],
+    "凡迪": ["凡迪"],
+    "赛西": ["Z"],
+    "泽亿": ["西红柿"],
+    "阿西": ["阿伟"],
+    "锦裳坊": ["汪宝辉"],
+    "涅瓦": ["李大大"],
+    "布列瑟侬": ["小趴菜"],
+    "达芬奇": ["宏林仓库"],
+    "顺兰": ["雄"],
+    "星尚美": ["7!"],
+    "穆林达": ["苗子"],
+    "俏衣人": ["俏依人"],
+    "鸿盛达": ["RONG"],
+    "聚图": ["聚图"],
+    "柏雅": ["Hollow City"],
+    "同顺": ["守有"],
+    "云贸": ["Koi"],
+    "白蚁": ["我的梦想"],
+    "大行家1": ["大行家1"],
+    "西永": ["西永"],
+    "肯蒂": ["Silent"],
+    "天正": ["Tsuki"],
+    "蒂洛诗": ["蒂洛诗"],
+    "温士顿": ["ou"],
+    "方元": ["selina"],
+    "洛艾依": ["燕姐"],
+    "正气": ["尽欢"],
+    "博果": ["Ai"],
+    "魅裙": ["Eiker"],
+    "初纷梦": ["熊妮"],
+    "卡奇豪": ["卡奇豪"],  # ✅ 已修复
+    "合凡": ["起风了"],
+    "博果尔": ["刘权"],
+    "青罗帐": ["青罗帐"],
+    "金鸣": ["金鸣"],
+    "龙馨": ["龙馨"],
+    "独秀": ["老虎"]
 }
-ADMIN_USERS = {"admin"}
+
+# ✅ 管理员账号修改
+ADMIN_USERS = {"RISA"}
+
 USER_MAP = {u: k for k, v in SUPPLIER_CONFIG.items() for u in v}
+
+# ✅ 防重复账号
+all_users = [u for v in SUPPLIER_CONFIG.values() for u in v]
+if len(all_users) != len(set(all_users)):
+    st.error("⚠️ 存在重复用户名，请检查 SUPPLIER_CONFIG")
 
 # ================= 工具 =================
 def load_json(path, default):
@@ -60,8 +109,7 @@ def get_tables():
         mp[label] = tid
     return sorted(opts, reverse=True), mp
 
-
-# ================= 登录（左侧 + 回车） =================
+# ================= 登录 =================
 if "user" not in st.session_state:
     st.session_state.user = None
 
@@ -75,36 +123,26 @@ with st.sidebar:
     st.subheader("🔐 登录")
 
     with st.form("login_form"):
-        user_input = st.text_input(
-            "登录账号",
-            placeholder="输入账号",
-            key="login_input"
-        )
-
+        user_input = st.text_input("登录账号", key="login_input")
         submit = st.form_submit_button("登录")
 
-    # 历史提示
     if user_input:
         matches = [u for u in history if user_input in u]
         if matches:
             st.caption("历史账号： " + " / ".join(matches))
 
-    # 登录逻辑
     if submit:
         final_user = user_input.strip()
 
         if final_user in ADMIN_USERS or final_user in USER_MAP:
             st.session_state.user = final_user
-
             if final_user not in history:
                 history.append(final_user)
-
             st.success("登录成功")
             st.rerun()
         else:
             st.error("用户不存在")
 
-    # 退出
     if st.session_state.user:
         if st.button("退出"):
             st.session_state.user = None
@@ -115,7 +153,6 @@ if not user:
     st.stop()
 
 is_admin = user in ADMIN_USERS
-
 
 # ================= 上传 =================
 if is_admin:
@@ -144,10 +181,8 @@ if is_admin:
         st.sidebar.success("上传完成")
         st.rerun()
 
-
 # ================= 表格列表 =================
 options, mp = get_tables()
-
 
 # ================= 展示 / 删除 =================
 if is_admin:
@@ -191,12 +226,10 @@ if not options:
     st.warning("暂无表格")
     st.stop()
 
-
 # ================= 选表 =================
 sel = st.selectbox("选择表格", options)
 tid = mp[sel]
 df = load_excel(tid)
-
 
 # ================= 权限 =================
 if not is_admin:
@@ -205,7 +238,6 @@ if not is_admin:
 else:
     df_edit = df.copy()
 
-
 # ================= 下拉配置 =================
 if is_admin:
     st.sidebar.subheader("⚙️ 下拉配置")
@@ -213,11 +245,7 @@ if is_admin:
     select_all = load_json(SELECT_FILE, {})
     old_cfg = select_all.get(tid, {})
 
-    cols = st.sidebar.multiselect(
-        "选择列",
-        df.columns.tolist(),
-        default=list(old_cfg.keys())
-    )
+    cols = st.sidebar.multiselect("选择列", df.columns.tolist(), default=list(old_cfg.keys()))
 
     new_cfg = {}
 
@@ -232,7 +260,6 @@ if is_admin:
         st.sidebar.success("已保存")
         st.rerun()
 
-
 # ================= 应用下拉 =================
 select_all = load_json(SELECT_FILE, {})
 select_cfg = select_all.get(tid, {})
@@ -246,7 +273,6 @@ for col, opts in select_cfg.items():
     if col in df_edit.columns:
         column_config[col] = st.column_config.SelectboxColumn(options=opts)
 
-
 # ================= 表格 =================
 edited = st.data_editor(
     df_edit,
@@ -255,7 +281,6 @@ edited = st.data_editor(
     column_config=column_config,
     key=f"editor_{tid}_{user}"
 )
-
 
 # ================= 保存 =================
 def auto_save():
@@ -291,12 +316,10 @@ def auto_save():
     st.success("✅ 已同步到管理端")
     st.rerun()
 
-
 if st.button("💾 保存"):
     auto_save()
 
-
-# ================= 管理端自动刷新 =================
+# ================= 自动刷新 =================
 if is_admin:
     auto = st.sidebar.checkbox("开启实时同步", value=True)
 

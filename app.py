@@ -61,7 +61,7 @@ def get_tables():
     return sorted(opts, reverse=True), mp
 
 
-# ================= 登录（最终优化版） =================
+# ================= 登录（左侧 + 回车） =================
 if "user" not in st.session_state:
     st.session_state.user = None
 
@@ -70,46 +70,45 @@ if "history_users" not in st.session_state:
 
 history = st.session_state.history_users
 
-with st.form("login_form"):
+with st.sidebar:
 
-    col1, col2 = st.columns([5,1])
+    st.subheader("🔐 登录")
 
-    with col1:
+    with st.form("login_form"):
         user_input = st.text_input(
             "登录账号",
-            placeholder="输入账号（支持历史提示）",
+            placeholder="输入账号",
             key="login_input"
         )
 
-    with col2:
         submit = st.form_submit_button("登录")
 
-# 历史提示（轻量，不占空间）
-if user_input:
-    matches = [u for u in history if user_input in u]
-    if matches:
-        st.caption("历史账号： " + " / ".join(matches))
+    # 历史提示
+    if user_input:
+        matches = [u for u in history if user_input in u]
+        if matches:
+            st.caption("历史账号： " + " / ".join(matches))
 
-# 登录逻辑（支持回车）
-if submit:
-    final_user = user_input.strip()
+    # 登录逻辑
+    if submit:
+        final_user = user_input.strip()
 
-    if final_user in ADMIN_USERS or final_user in USER_MAP:
-        st.session_state.user = final_user
+        if final_user in ADMIN_USERS or final_user in USER_MAP:
+            st.session_state.user = final_user
 
-        if final_user not in history:
-            history.append(final_user)
+            if final_user not in history:
+                history.append(final_user)
 
-        st.success("登录成功")
-        st.rerun()
-    else:
-        st.error("用户不存在")
+            st.success("登录成功")
+            st.rerun()
+        else:
+            st.error("用户不存在")
 
-# 退出
-if st.session_state.user:
-    if st.button("退出"):
-        st.session_state.user = None
-        st.rerun()
+    # 退出
+    if st.session_state.user:
+        if st.button("退出"):
+            st.session_state.user = None
+            st.rerun()
 
 user = st.session_state.user
 if not user:

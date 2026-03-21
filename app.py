@@ -148,11 +148,14 @@ with st.sidebar:
     </script>
     """, height=180)
 
-    # ✅ 关键防炸
+    # ===== 登录处理（修复脏字符问题）=====
     if login_val is not None and str(login_val).strip() != "":
-        username = str(login_val).strip()
+        username = str(login_val)
+        username = username.replace("\u00A0", "")
+        username = username.replace("\n", "").replace("\r", "")
+        username = username.strip()
 
-        if username in ADMIN_USERS or username in USER_MAP:
+        if username.lower() in [u.lower() for u in ADMIN_USERS] or username in USER_MAP:
 
             st.components.v1.html(f"""
             <script>

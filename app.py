@@ -39,7 +39,6 @@ def load_table(tid):
         df = df.fillna("").astype(str)
         df.columns = df.columns.str.strip()
 
-        # 🔥 防止空格问题
         if "供应商简称" in df.columns:
             df["供应商简称"] = df["供应商简称"].astype(str).str.strip()
 
@@ -50,53 +49,22 @@ def load_table(tid):
 
 # ================= 用户 =================
 SUPPLIER_CONFIG = {
-    "纪梵黎": ["代**"],
-    "铭润": ["dryson", "7Zz"],
-    "康林": ["Tau"],
-    "卓黎凯": ["杨小方的小方"],
-    "依嘉依": ["陈"],
-    "华中": ["钧之", "木木"],
-    "函厦": ["邓红玫"],
-    "凡迪": ["凡迪"],
-    "赛西": ["Z"],
-    "泽亿": ["西红柿"],
-    "阿西": ["阿伟"],
-    "锦裳坊": ["汪宝辉"],
-    "涅瓦": ["李大大"],
-    "布列瑟侬": ["小趴菜"],
-    "达芬奇": ["宏林仓库"],
-    "顺兰": ["雄"],
-    "星尚美": ["7!"],
-    "穆林达": ["苗子"],
-    "俏衣人": ["俏依人"],
-    "鸿盛达": ["RONG"],
-    "聚图": ["聚图"],
-    "柏雅": ["Hollow City"],
-    "同顺": ["守有"],
-    "云贸": ["Koi"],
-    "白蚁": ["我的梦想"],
-    "大行家1": ["大行家1"],
-    "西永": ["西永"],
-    "肯蒂": ["Silent"],
-    "天正": ["Tsuki"],
-    "蒂洛诗": ["蒂洛诗"],
-    "温士顿": ["ou"],
-    "方元": ["selina"],
-    "洛艾依": ["燕姐"],
-    "正气": ["尽欢"],
-    "博果": ["Ai"],
-    "魅裙": ["Eiker"],
-    "初纷梦": ["熊妮"],
-    "卡奇豪": ["卡奇豪"],
-    "合凡": ["起风了"],
-    "博果尔": ["刘权"],
-    "青罗帐": ["青罗帐"],
-    "金鸣": ["金鸣"],
-    "龙馨": ["龙馨"],
-    "独秀": ["老虎"],
-    "恒尚": ["A小康先森"],
-    "福蕾雅": ["严金虹"],
-    "杰祥": ["金刚小婷", "杰祥服饰"]
+    "纪梵黎": ["代**"], "铭润": ["dryson", "7Zz"], "康林": ["Tau"],
+    "卓黎凯": ["杨小方的小方"], "依嘉依": ["陈"], "华中": ["钧之", "木木"],
+    "函厦": ["邓红玫"], "凡迪": ["凡迪"], "赛西": ["Z"],
+    "泽亿": ["西红柿"], "阿西": ["阿伟"], "锦裳坊": ["汪宝辉"],
+    "涅瓦": ["李大大"], "布列瑟侬": ["小趴菜"], "达芬奇": ["宏林仓库"],
+    "顺兰": ["雄"], "星尚美": ["7!"], "穆林达": ["苗子"],
+    "俏衣人": ["俏依人"], "鸿盛达": ["RONG"], "聚图": ["聚图"],
+    "柏雅": ["Hollow City"], "同顺": ["守有"], "云贸": ["Koi"],
+    "白蚁": ["我的梦想"], "大行家1": ["大行家1"], "西永": ["西永"],
+    "肯蒂": ["Silent"], "天正": ["Tsuki"], "蒂洛诗": ["蒂洛诗"],
+    "温士顿": ["ou"], "方元": ["selina"], "洛艾依": ["燕姐"],
+    "正气": ["尽欢"], "博果": ["Ai"], "魅裙": ["Eiker"],
+    "初纷梦": ["熊妮"], "卡奇豪": ["卡奇豪"], "合凡": ["起风了"],
+    "博果尔": ["刘权"], "青罗帐": ["青罗帐"], "金鸣": ["金鸣"],
+    "龙馨": ["龙馨"], "独秀": ["老虎"], "恒尚": ["A小康先森"],
+    "福蕾雅": ["严金虹"], "杰祥": ["金刚小婷", "杰祥服饰"]
 }
 
 ADMIN_USERS = {"RISA"}
@@ -200,7 +168,6 @@ if is_admin:
                 st.sidebar.error(f"{f.name}缺少供应商列")
                 continue
 
-            # 🔥 清洗
             df["供应商简称"] = df["供应商简称"].astype(str).str.strip()
 
             df.insert(0, "ID", [uuid.uuid4().hex[:8] for _ in range(len(df))])
@@ -314,12 +281,38 @@ for i, sel in enumerate(sels):
         else:
             st.info(notice_text if notice_text else "暂无公告")
 
+        # ================= 填写进度 =================
+        progress_all = load_json(PROGRESS_FILE, {})
+        done_list = progress_all.get(tid, [])
+
+        all_suppliers = list(SUPPLIER_CONFIG.keys())
+        done_suppliers = done_list
+        todo_suppliers = [s for s in all_suppliers if s not in done_suppliers]
+
+        st.markdown("### 📊 填写进度")
+
+        col1, col2 = st.columns(2)
+
+        with col1:
+            st.success(f"✅ 已填写（{len(done_suppliers)}）")
+            st.write("、".join(done_suppliers) if done_suppliers else "暂无")
+
+        with col2:
+            st.warning(f"❌ 未填写（{len(todo_suppliers)}）")
+            st.write("、".join(todo_suppliers) if todo_suppliers else "全部完成 🎉")
+
         # 表格
         if not is_admin:
             supplier = USER_MAP[user].strip()
             df_edit = df[
                 df["供应商简称"].astype(str).str.contains(supplier, case=False, na=False)
             ].copy()
+
+            if supplier in done_suppliers:
+                st.success("你已完成填写 ✅")
+            else:
+                st.warning("你还未填写 ❗")
+
         else:
             df_edit = df.copy()
 
@@ -363,7 +356,6 @@ for i, sel in enumerate(sels):
                     conn.execute("BEGIN")
 
                     for rid, row in rows_to_update.iterrows():
-
                         changed_cols = changed_mask.loc[rid]
                         cols_to_update = changed_cols[changed_cols].index.tolist()
 

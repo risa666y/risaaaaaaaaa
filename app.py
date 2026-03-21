@@ -61,14 +61,12 @@ SUPPLIER_CONFIG = {
     "金鸣": ["金鸣"],
     "龙馨": ["龙馨"],
     "独秀": ["老虎"],
-
     "恒尚": ["A小康先森"],
     "福蕾雅": ["严金虹"],
     "杰祥": ["金刚小婷", "杰祥服饰"]
 }
 
 ADMIN_USERS = {"RISA"}
-
 USER_MAP = {u: k for k, v in SUPPLIER_CONFIG.items() for u in v}
 
 all_users = [u for v in SUPPLIER_CONFIG.values() for u in v]
@@ -187,6 +185,7 @@ if is_admin:
 # ================= 表格列表 =================
 options, mp = get_tables()
 
+# 展示控制
 if is_admin:
     st.sidebar.subheader("👁️ 表格展示")
     show_cfg = load_json(SHOW_FILE, [])
@@ -199,7 +198,26 @@ if is_admin:
 
     if st.sidebar.button("保存展示"):
         save_json(new_show, SHOW_FILE)
+        st.sidebar.success("已保存")
         st.rerun()
+
+    # 删除
+    st.sidebar.subheader("🗑 删除表格")
+    del_label = st.sidebar.selectbox("选择删除", [""] + options)
+
+    if st.sidebar.button("删除"):
+        if del_label:
+            tid_del = mp[del_label]
+
+            if os.path.exists(f"{SAVE_DIR}/{tid_del}.xlsx"):
+                os.remove(f"{SAVE_DIR}/{tid_del}.xlsx")
+
+            idx = load_json(INDEX_FILE, {})
+            idx.pop(tid_del, None)
+            save_json(idx, INDEX_FILE)
+
+            st.sidebar.success("已删除")
+            st.rerun()
 
 else:
     show_cfg = load_json(SHOW_FILE, [])
@@ -209,6 +227,43 @@ if not options:
     st.warning("暂无表格")
     st.stop()
 
+# ================= 下拉配置（修复版） =================
+if is_admin:
+    st.sidebar.subheader("⚙️ 下拉配置")
+
+    config_target = st.sidebar.selectbox("选择配置表", options)
+
+    if config_target:
+        tid_cfg = mp[config_target]
+        df_cfg = load_excel(tid_cfg)
+
+        select_all = load_json(SELECT_FILE, {})
+        old_cfg = select_all.get(tid_cfg, {})
+
+        cols = st.sidebar.multiselect(
+            "选择列",
+            df_cfg.columns.tolist(),
+            default=list(old_cfg.keys()),
+            key=f"cols_{tid_cfg}"
+        )
+
+        new_cfg = {}
+
+        for col in cols:
+            default_val = ",".join(old_cfg.get(col, []))
+            txt = st.sidebar.text_area(
+                f"{col}选项",
+                value=default_val,
+                key=f"{tid_cfg}_{col}"
+            )
+            new_cfg[col] = [i.strip() for i in txt.split(",") if i.strip()]
+
+        if st.sidebar.button("保存下拉配置"):
+            select_all[tid_cfg] = new_cfg
+            save_json(select_all, SELECT_FILE)
+            st.sidebar.success("已保存")
+            st.rerun()
+
 # ================= 多表选择 =================
 sels = st.multiselect("选择表格（可多选）", options)
 
@@ -216,7 +271,7 @@ if not sels:
     st.warning("请选择至少一个表格")
     st.stop()
 
-# ================= 多表循环展示（纵向） =================
+# ================= 多表展示（纵向） =================
 for sel in sels:
 
     st.markdown("---")
@@ -231,7 +286,7 @@ for sel in sels:
     else:
         df_edit = df.copy()
 
-    # 下拉
+    # 下拉应用
     select_all = load_json(SELECT_FILE, {})
     select_cfg = select_all.get(tid, {})
 
@@ -244,7 +299,6 @@ for sel in sels:
         if col in df_edit.columns:
             column_config[col] = st.column_config.SelectboxColumn(options=opts)
 
-    # 表格
     edited = st.data_editor(
         df_edit,
         use_container_width=True,
@@ -282,7 +336,6 @@ for sel in sels:
 
             save_excel(full_df, tid)
 
-            # 进度
             progress = load_json(PROGRESS_FILE, {})
             if tid not in progress:
                 progress[tid] = []
@@ -295,7 +348,7 @@ for sel in sels:
         st.success("已保存")
         st.rerun()
 
-    # 管理端进度
+    # 进度
     if is_admin:
         progress = load_json(PROGRESS_FILE, {})
         done = set(progress.get(tid, []))

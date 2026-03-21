@@ -39,6 +39,10 @@ def load_table(tid):
         df = df.fillna("").astype(str)
         df.columns = df.columns.str.strip()
 
+        # 🔥 防止空格问题
+        if "供应商简称" in df.columns:
+            df["供应商简称"] = df["供应商简称"].astype(str).str.strip()
+
         if "ID" not in df.columns:
             df.insert(0, "ID", [uuid.uuid4().hex[:8] for _ in range(len(df))])
 
@@ -196,6 +200,9 @@ if is_admin:
                 st.sidebar.error(f"{f.name}缺少供应商列")
                 continue
 
+            # 🔥 清洗
+            df["供应商简称"] = df["供应商简称"].astype(str).str.strip()
+
             df.insert(0, "ID", [uuid.uuid4().hex[:8] for _ in range(len(df))])
 
             tid = gen_id()
@@ -310,7 +317,9 @@ for i, sel in enumerate(sels):
         # 表格
         if not is_admin:
             supplier = USER_MAP[user].strip()
-            df_edit = df[df["供应商简称"] == supplier].copy()
+            df_edit = df[
+                df["供应商简称"].astype(str).str.contains(supplier, case=False, na=False)
+            ].copy()
         else:
             df_edit = df.copy()
 
@@ -367,8 +376,8 @@ for i, sel in enumerate(sels):
                             conn.execute(f"""
                                 UPDATE '{tid}'
                                 SET "{col}" = ?
-                                WHERE ID = ? AND "供应商简称" = ?
-                            """, (val, rid, supplier))
+                                WHERE ID = ? AND "供应商简称" LIKE ?
+                            """, (val, rid, f"%{supplier}%"))
 
                     conn.commit()
 

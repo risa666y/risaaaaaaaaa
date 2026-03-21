@@ -185,23 +185,25 @@ if is_admin:
 # ================= 表格列表 =================
 options, mp = get_tables()
 
-# 展示控制
+# ================= 展示控制（统一逻辑） =================
+st.sidebar.subheader("👁️ 表格展示")
+
+show_cfg = load_json(SHOW_FILE, [])
+new_show = []
+
+for label in options:
+    tid_tmp = mp[label]
+    if st.sidebar.checkbox(label, value=(tid_tmp in show_cfg)):
+        new_show.append(tid_tmp)
+
+# ✅ 自动保存（关键优化）
+if set(new_show) != set(show_cfg):
+    save_json(new_show, SHOW_FILE)
+    st.sidebar.success("已自动保存")
+    st.rerun()
+
+# ================= 删除（仅管理员） =================
 if is_admin:
-    st.sidebar.subheader("👁️ 表格展示")
-    show_cfg = load_json(SHOW_FILE, [])
-    new_show = []
-
-    for label in options:
-        tid_tmp = mp[label]
-        if st.sidebar.checkbox(label, value=(tid_tmp in show_cfg)):
-            new_show.append(tid_tmp)
-
-    if st.sidebar.button("保存展示"):
-        save_json(new_show, SHOW_FILE)
-        st.sidebar.success("已保存")
-        st.rerun()
-
-    # 删除
     st.sidebar.subheader("🗑 删除表格")
     del_label = st.sidebar.selectbox("选择删除", [""] + options)
 
@@ -219,15 +221,7 @@ if is_admin:
             st.sidebar.success("已删除")
             st.rerun()
 
-else:
-    show_cfg = load_json(SHOW_FILE, [])
-    options = [o for o in options if mp[o] in show_cfg]
-
-if not options:
-    st.warning("暂无表格")
-    st.stop()
-
-# ================= 下拉配置（修复版） =================
+# ================= 下拉配置 =================
 if is_admin:
     st.sidebar.subheader("⚙️ 下拉配置")
 
@@ -264,107 +258,97 @@ if is_admin:
             st.sidebar.success("已保存")
             st.rerun()
 
-# ================= 多表选择 =================
-sels = st.multiselect("选择表格（可多选）", options)
+# ================= ⭐核心：只展示左边勾选的 =================
+sels = [o for o in options if mp[o] in show_cfg]
 
 if not sels:
-    st.warning("请选择至少一个表格")
+    st.warning("暂无可展示表格")
     st.stop()
 
-# ================= 多表展示（纵向） =================
-for sel in sels:
+# ================= 表格展示 =================
+for i, sel in enumerate(sels):
 
     st.markdown("---")
-    st.subheader(f"📄 {sel}")
+    with st.expander(f"📄 {sel}", expanded=(i == 0)):
 
-    tid = mp[sel]
-    df = load_excel(tid)
+        tid = mp[sel]
+        df = load_excel(tid)
 
-    if not is_admin:
-        supplier = USER_MAP[user].strip()
-        df_edit = df[df["供应商简称"].str.strip() == supplier].copy()
-    else:
-        df_edit = df.copy()
-
-    # 下拉应用
-    select_all = load_json(SELECT_FILE, {})
-    select_cfg = select_all.get(tid, {})
-
-    column_config = {}
-
-    if not is_admin and "供应商简称" in df_edit.columns:
-        column_config["供应商简称"] = st.column_config.TextColumn(disabled=True)
-
-    for col, opts in select_cfg.items():
-        if col in df_edit.columns:
-            column_config[col] = st.column_config.SelectboxColumn(options=opts)
-
-    edited = st.data_editor(
-        df_edit,
-        use_container_width=True,
-        height=500,
-        column_config=column_config,
-        key=f"editor_{tid}_{user}"
-    )
-
-    # 保存
-    if st.button(f"💾 保存：{sel}", key=f"save_{tid}"):
-
-        if edited is None or edited.empty:
-            st.warning("没有可保存数据")
-            continue
-
-        full_df = load_excel(tid)
-
-        if is_admin:
-            save_excel(edited, tid)
-        else:
+        if not is_admin:
             supplier = USER_MAP[user].strip()
+            df_edit = df[df["供应商简称"].str.strip() == supplier].copy()
+        else:
+            df_edit = df.copy()
 
-            for _, row in edited.iterrows():
-                for col in edited.columns:
-                    val = str(row[col]).strip()
-                    if val == "":
-                        continue
+        select_all = load_json(SELECT_FILE, {})
+        select_cfg = select_all.get(tid, {})
 
-                    mask = (
-                        (full_df["ID"] == row["ID"]) &
-                        (full_df["供应商简称"].str.strip() == supplier)
-                    )
+        column_config = {}
 
-                    full_df.loc[mask, col] = val
+        if not is_admin and "供应商简称" in df_edit.columns:
+            column_config["供应商简称"] = st.column_config.TextColumn(disabled=True)
 
-            save_excel(full_df, tid)
+        for col, opts in select_cfg.items():
+            if col in df_edit.columns:
+                column_config[col] = st.column_config.SelectboxColumn(options=opts)
 
+        edited = st.data_editor(
+            df_edit,
+            use_container_width=True,
+            height=500,
+            column_config=column_config,
+            key=f"editor_{tid}_{user}"
+        )
+
+        if st.button(f"💾 保存：{sel}", key=f"save_{tid}"):
+
+            if edited is None or edited.empty:
+                st.warning("没有可保存数据")
+                continue
+
+            full_df = load_excel(tid)
+
+            if is_admin:
+                save_excel(edited, tid)
+            else:
+                supplier = USER_MAP[user].strip()
+
+                for _, row in edited.iterrows():
+                    for col in edited.columns:
+                        val = str(row[col]).strip()
+                        if val == "":
+                            continue
+
+                        mask = (
+                            (full_df["ID"] == row["ID"]) &
+                            (full_df["供应商简称"].str.strip() == supplier)
+                        )
+
+                        full_df.loc[mask, col] = val
+
+                save_excel(full_df, tid)
+
+                progress = load_json(PROGRESS_FILE, {})
+                if tid not in progress:
+                    progress[tid] = []
+
+                if supplier not in progress[tid]:
+                    progress[tid].append(supplier)
+
+                save_json(progress, PROGRESS_FILE)
+
+            st.success("已保存")
+            st.rerun()
+
+        # 进度
+        if is_admin:
             progress = load_json(PROGRESS_FILE, {})
-            if tid not in progress:
-                progress[tid] = []
+            done = set(progress.get(tid, []))
+            all_s = set(df["供应商简称"].str.strip().unique())
+            not_done = all_s - done
 
-            if supplier not in progress[tid]:
-                progress[tid].append(supplier)
-
-            save_json(progress, PROGRESS_FILE)
-
-        st.success("已保存")
-        st.rerun()
-
-    # 进度
-    if is_admin:
-        progress = load_json(PROGRESS_FILE, {})
-        done = set(progress.get(tid, []))
-        all_s = set(df["供应商简称"].str.strip().unique())
-        not_done = all_s - done
-
-        with st.expander(f"📊 进度：{sel}"):
-            c1, c2 = st.columns(2)
-
-            with c1:
-                st.success(f"已完成 {len(done)}")
-                st.write(sorted(done))
-
-            with c2:
-                st.error(f"未完成 {len(not_done)}")
-                st.write(sorted(not_done))
+            st.success(f"已完成 {len(done)}：{sorted(done)}")
+            st.error(f"未完成 {len(not_done)}：{sorted(not_done)}")
 
 # ================= 自动刷新 =================
 if is_admin:

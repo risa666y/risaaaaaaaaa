@@ -4,7 +4,7 @@ import os
 import json
 import time
 import uuid
-from streamlit_js_eval import streamlit_js_eval  # ✅ 本机存储
+from streamlit_js_eval import streamlit_js_eval
 
 st.set_page_config(layout="wide")
 
@@ -93,10 +93,16 @@ def save_excel(df, tid):
         os.rename(path, backup)
     df.to_excel(path, index=False)
 
+# ✅ 防崩溃读取
 def load_excel(tid):
     path = f"{SAVE_DIR}/{tid}.xlsx"
     if os.path.exists(path):
-        df = pd.read_excel(path, dtype=str).fillna("")
+        try:
+            df = pd.read_excel(path, dtype=str).fillna("")
+        except Exception:
+            st.error(f"⚠️ 文件损坏：{path}")
+            return pd.DataFrame()
+
         df.columns = df.columns.str.strip()
         df = df.astype(str).apply(lambda col: col.str.strip())
 
@@ -104,6 +110,7 @@ def load_excel(tid):
             df.insert(0, "ID", [uuid.uuid4().hex[:8] for _ in range(len(df))])
 
         return df.reset_index(drop=True)
+
     return pd.DataFrame()
 
 def get_tables():
@@ -115,7 +122,7 @@ def get_tables():
         mp[label] = tid
     return sorted(opts, reverse=True), mp
 
-# ================= 登录（本机记忆 + 回车） =================
+# ================= 登录 =================
 if "user" not in st.session_state:
     st.session_state.user = None
 
@@ -153,7 +160,7 @@ with st.sidebar:
             st.rerun()
 
     else:
-        with st.form("login_form", clear_on_submit=False):
+        with st.form("login_form"):
             user_input = st.text_input("登录账号", value=last_user)
 
             if user_input:
@@ -176,7 +183,6 @@ with st.sidebar:
                         key="set_history"
                     )
 
-                    st.success("登录成功")
                     st.rerun()
                 else:
                     st.error("用户不存在")
@@ -194,7 +200,12 @@ if is_admin:
 
     if files and st.sidebar.button("确认上传"):
         for f in files:
-            df = pd.read_excel(f)
+            try:
+                df = pd.read_excel(f)
+            except Exception:
+                st.sidebar.error(f"{f.name} 文件损坏或不是Excel")
+                continue
+
             df.columns = df.columns.str.strip()
 
             if "供应商简称" not in df.columns:
@@ -311,7 +322,6 @@ for i, sel in enumerate(sels):
             if st.button(f"保存公告_{tid}"):
                 notice_all[tid] = new_notice
                 save_json(notice_all, NOTICE_FILE)
-                st.success("公告已保存")
                 st.rerun()
         else:
             st.info(notice_text if notice_text else "暂无公告")

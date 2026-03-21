@@ -333,27 +333,37 @@ for i, sel in enumerate(sels):
         else:
             df_edit = df.copy()
 
-        # ================= 🔍 筛选功能 =================
+        # ================= 🔍 Excel筛选 =================
         st.markdown("### 🔍 数据筛选")
 
-        col1, col2 = st.columns(2)
+        keyword = st.text_input("🔎 关键词搜索", key=f"search_{tid}_{user}")
 
-        with col1:
-            keyword = st.text_input("关键词搜索（全字段）", key=f"search_{tid}_{user}")
+        filter_values = {}
+        cols = df_edit.columns.tolist()
+        col_chunks = [cols[i:i+4] for i in range(0, len(cols), 4)]
 
-        with col2:
-            filter_col = st.selectbox(
-                "选择筛选列",
-                [""] + df_edit.columns.tolist(),
-                key=f"filtercol_{tid}_{user}"
-            )
+        for chunk_idx, col_group in enumerate(col_chunks):
+            ui_cols = st.columns(len(col_group))
+            for i2, col in enumerate(col_group):
+                with ui_cols[i2]:
+                    unique_vals = sorted(df_edit[col].astype(str).dropna().unique().tolist())
 
-        filter_val = ""
-        if filter_col:
-            filter_val = st.text_input(
-                f"{filter_col}筛选值",
-                key=f"filterval_{tid}_{user}"
-            )
+                    selected = st.multiselect(
+                        col,
+                        options=unique_vals,
+                        default=st.session_state.get(f"filter_{tid}_{user}_{col}", []),
+                        key=f"filter_{tid}_{user}_{col}"
+                    )
+
+                    filter_values[col] = selected
+
+        if st.button("❌ 清空所有筛选", key=f"clear_filter_{tid}_{user}"):
+            st.session_state[f"search_{tid}_{user}"] = ""
+            for col in df_edit.columns:
+                key_name = f"filter_{tid}_{user}_{col}"
+                if key_name in st.session_state:
+                    st.session_state[key_name] = []
+            st.rerun()
 
         df_filtered = df_edit.copy()
 
@@ -362,10 +372,9 @@ for i, sel in enumerate(sels):
                 df_filtered.apply(lambda row: row.astype(str).str.contains(keyword, case=False).any(), axis=1)
             ]
 
-        if filter_col and filter_val:
-            df_filtered = df_filtered[
-                df_filtered[filter_col].astype(str).str.contains(filter_val, case=False, na=False)
-            ]
+        for col, selected_vals in filter_values.items():
+            if selected_vals:
+                df_filtered = df_filtered[df_filtered[col].astype(str).isin(selected_vals)]
 
         df_edit = df_filtered
 
@@ -400,10 +409,10 @@ for i, sel in enumerate(sels):
                 else:
                     supplier = USER_MAP[user].strip()
 
-                    original_df = df_edit.set_index("ID")
+                    original_df = df.set_index("ID")  # ✅ 修复：用全量数据
                     edited_df = edited.set_index("ID")
 
-                    changed_mask = edited_df.ne(original_df)
+                    changed_mask = edited_df.ne(original_df.loc[edited_df.index])
                     changed_rows = changed_mask.any(axis=1)
                     rows_to_update = edited_df[changed_rows]
 

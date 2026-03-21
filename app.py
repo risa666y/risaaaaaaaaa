@@ -4,6 +4,7 @@ import os
 import json
 import time
 import uuid
+from streamlit_js_eval import streamlit_js_eval  # ✅ 本机存储
 
 st.set_page_config(layout="wide")
 
@@ -14,7 +15,7 @@ INDEX_FILE = f"{SAVE_DIR}/index.json"
 SHOW_FILE = f"{SAVE_DIR}/show_tables.json"
 SELECT_FILE = f"{SAVE_DIR}/select_options.json"
 PROGRESS_FILE = f"{SAVE_DIR}/progress.json"
-NOTICE_FILE = f"{SAVE_DIR}/notice.json"  # ✅ 公告文件
+NOTICE_FILE = f"{SAVE_DIR}/notice.json"
 
 # ================= 用户 =================
 SUPPLIER_CONFIG = {
@@ -114,7 +115,7 @@ def get_tables():
         mp[label] = tid
     return sorted(opts, reverse=True), mp
 
-# ================= 登录 =================
+# ================= 登录（本机记忆 + 回车） =================
 if "user" not in st.session_state:
     st.session_state.user = None
 
@@ -128,6 +129,21 @@ if saved_user and not st.session_state.user:
 with st.sidebar:
     st.subheader("🔐 登录")
 
+    history_raw = streamlit_js_eval(
+        js_expressions="localStorage.getItem('history_users')",
+        key="get_history"
+    )
+
+    if history_raw:
+        try:
+            history = json.loads(history_raw)
+        except:
+            history = []
+    else:
+        history = []
+
+    last_user = history[-1] if history else ""
+
     if st.session_state.user:
         st.success(f"当前用户：{st.session_state.user}")
 
@@ -137,14 +153,33 @@ with st.sidebar:
             st.rerun()
 
     else:
-        user_input = st.text_input("登录账号")
-        if st.button("登录"):
-            if user_input in ADMIN_USERS or user_input in USER_MAP:
-                st.session_state.user = user_input
-                st.query_params["user"] = user_input
-                st.rerun()
-            else:
-                st.error("用户不存在")
+        with st.form("login_form", clear_on_submit=False):
+            user_input = st.text_input("登录账号", value=last_user)
+
+            if user_input:
+                matches = [u for u in history if u.startswith(user_input)]
+                if matches:
+                    st.caption("历史账号：" + " / ".join(matches))
+
+            submit = st.form_submit_button("登录")
+
+            if submit:
+                if user_input in ADMIN_USERS or user_input in USER_MAP:
+                    st.session_state.user = user_input
+                    st.query_params["user"] = user_input
+
+                    if user_input not in history:
+                        history.append(user_input)
+
+                    streamlit_js_eval(
+                        js_expressions=f"localStorage.setItem('history_users', '{json.dumps(history)}')",
+                        key="set_history"
+                    )
+
+                    st.success("登录成功")
+                    st.rerun()
+                else:
+                    st.error("用户不存在")
 
 user = st.session_state.user
 if not user:
@@ -265,44 +300,31 @@ for i, sel in enumerate(sels):
         tid = mp[sel]
         df = load_excel(tid)
 
-        # ================= 公告 =================
+        # 公告
         notice_all = load_json(NOTICE_FILE, {})
         notice_text = notice_all.get(tid, "")
 
         st.markdown("### 📢 公告")
 
         if is_admin:
-            new_notice = st.text_area(
-                "编辑公告",
-                value=notice_text,
-                key=f"notice_{tid}"
-            )
-
+            new_notice = st.text_area("编辑公告", value=notice_text, key=f"notice_{tid}")
             if st.button(f"保存公告_{tid}"):
                 notice_all[tid] = new_notice
                 save_json(notice_all, NOTICE_FILE)
                 st.success("公告已保存")
                 st.rerun()
         else:
-            if notice_text:
-                st.info(notice_text)
-            else:
-                st.caption("暂无公告")
+            st.info(notice_text if notice_text else "暂无公告")
 
-        # ================= 表格 =================
+        # 表格
         if not is_admin:
             supplier = USER_MAP[user].strip()
             df_edit = df[
-                df["供应商简称"].astype(str).str.contains(
-                    supplier,
-                    case=False,
-                    na=False
-                )
+                df["供应商简称"].astype(str).str.contains(supplier, case=False, na=False)
             ].copy()
         else:
             df_edit = df.copy()
 
-        # 下拉配置
         select_all = load_json(SELECT_FILE, {})
         select_cfg = select_all.get(tid, {})
 
@@ -338,9 +360,7 @@ for i, sel in enumerate(sels):
                     mask = (
                         (full_df["ID"] == rid) &
                         (full_df["供应商简称"].astype(str).str.contains(
-                            supplier,
-                            case=False,
-                            na=False
+                            supplier, case=False, na=False
                         ))
                     )
 
